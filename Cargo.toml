@@ -4,6 +4,8 @@ version = "0.1.0"
 edition = "2021"
 description = "A blazing-fast TUI for Scoutbook data"
 authors = ["David LaPorte"]
+repository = "https://github.com/dlaporte/scoutbook88"
+license = "MIT"
 
 [dependencies]
 # TUI
@@ -51,3 +53,8 @@ rpassword = "7"
 lto = true
 codegen-units = 1
 strip = true
+
+# The profile that 'dist' will build with
+[profile.dist]
+inherits = "release"
+lto = "thin"
