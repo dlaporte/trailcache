@@ -54,12 +54,12 @@ Between campouts, merit badge classes, and trying to remember which scout needs 
 
 **macOS / Linux:**
 ```bash
-curl --proto '=https' --tlsv1.2 -LsSf https://github.com/dlaporte/scoutbook88/releases/latest/download/scoutbook-tui-installer.sh | sh
+curl --proto '=https' --tlsv1.2 -LsSf https://github.com/dlaporte/scoutbook88/releases/latest/download/scoutbook88-installer.sh | sh
 ```
 
 **Windows (PowerShell):**
 ```powershell
-irm https://github.com/dlaporte/scoutbook88/releases/latest/download/scoutbook-tui-installer.ps1 | iex
+irm https://github.com/dlaporte/scoutbook88/releases/latest/download/scoutbook88-installer.ps1 | iex
 ```
 
 ### From Source
@@ -68,7 +68,7 @@ irm https://github.com/dlaporte/scoutbook88/releases/latest/download/scoutbook-t
 git clone https://github.com/dlaporte/scoutbook88.git
 cd scoutbook88
 cargo build --release
-./target/release/scoutbook-tui
+./target/release/scoutbook88
 ```
 
 ## KEYBOARD CONTROLS
