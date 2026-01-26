@@ -195,85 +195,96 @@ fn render_status_bar(frame: &mut Frame, app: &App, area: Rect) {
 }
 
 fn render_help_overlay(frame: &mut Frame, _app: &App) {
-    let area = centered_rect(60, 80, frame.area());
+    // Fixed size dialog matching login/quit overlays
+    let area = centered_rect_fixed(52, 27, frame.area());
 
     // Clear the area
     frame.render_widget(Clear, area);
 
+    let version = env!("CARGO_PKG_VERSION");
+
     let help_text = vec![
-        // ASCII Art Logo
-        Line::from(Span::styled("    ╔═╗╔═╗╔═╗╦ ╦╔╦╗╔╗ ╔═╗╔═╗╦╔═", styles::title_style())),
-        Line::from(Span::styled("    ╚═╗║  ║ ║║ ║ ║ ╠╩╗║ ║║ ║╠╩╗  '88", styles::title_style())),
-        Line::from(Span::styled("    ╚═╝╚═╝╚═╝╚═╝ ╩ ╚═╝╚═╝╚═╝╩ ╩", styles::title_style())),
+        // ASCII Art Logo (centered for 52-width box, 50 interior)
+        Line::from(Span::styled(
+            "     ╔═╗╔═╗╔═╗╦ ╦╔╦╗╔╗ ╔═╗╔═╗╦╔═",
+            styles::title_style(),
+        )),
+        Line::from(Span::styled(
+            "     ╚═╗║  ║ ║║ ║ ║ ╠╩╗║ ║║ ║╠╩╗  '88",
+            styles::title_style(),
+        )),
+        Line::from(Span::styled(
+            "     ╚═╝╚═╝╚═╝╚═╝ ╩ ╚═╝╚═╝╚═╝╩ ╩",
+            styles::title_style(),
+        )),
+        Line::from(Span::styled(
+            format!("              version {}", version),
+            styles::muted_style(),
+        )),
         Line::from(""),
-        Line::from(Span::styled("       A Scoutmaster's Best Friend", styles::muted_style())),
-        Line::from(""),
-        Line::from(Span::styled("Global", styles::highlight_style())),
+        Line::from(Span::styled(" Navigation", styles::highlight_style())),
         Line::from(vec![
-            Span::styled("  1-4        ", styles::help_key_style()),
+            Span::styled("  1-4       ", styles::help_key_style()),
             Span::styled("Switch tabs", styles::help_desc_style()),
         ]),
         Line::from(vec![
-            Span::styled("  ←/→        ", styles::help_key_style()),
-            Span::styled("Previous/next tab (or detail view)", styles::help_desc_style()),
+            Span::styled("  ←/→       ", styles::help_key_style()),
+            Span::styled("Prev/next tab or detail view", styles::help_desc_style()),
         ]),
         Line::from(vec![
-            Span::styled("  Tab        ", styles::help_key_style()),
+            Span::styled("  Tab       ", styles::help_key_style()),
             Span::styled("Switch focus (list ↔ detail)", styles::help_desc_style()),
         ]),
         Line::from(vec![
-            Span::styled("  ↑/↓        ", styles::help_key_style()),
+            Span::styled("  ↑/↓ j/k   ", styles::help_key_style()),
             Span::styled("Navigate list", styles::help_desc_style()),
         ]),
         Line::from(vec![
-            Span::styled("  Enter      ", styles::help_key_style()),
+            Span::styled("  Enter     ", styles::help_key_style()),
             Span::styled("Select / drill down", styles::help_desc_style()),
         ]),
         Line::from(vec![
-            Span::styled("  Esc        ", styles::help_key_style()),
+            Span::styled("  Esc       ", styles::help_key_style()),
             Span::styled("Go back", styles::help_desc_style()),
         ]),
+        Line::from(""),
+        Line::from(Span::styled(" Actions", styles::highlight_style())),
         Line::from(vec![
-            Span::styled("  u          ", styles::help_key_style()),
+            Span::styled("  /         ", styles::help_key_style()),
+            Span::styled("Search", styles::help_desc_style()),
+        ]),
+        Line::from(vec![
+            Span::styled("  u         ", styles::help_key_style()),
             Span::styled("Update data from Scoutbook", styles::help_desc_style()),
         ]),
         Line::from(vec![
-            Span::styled("  q          ", styles::help_key_style()),
+            Span::styled("  q         ", styles::help_key_style()),
             Span::styled("Quit", styles::help_desc_style()),
         ]),
         Line::from(""),
-        Line::from(Span::styled("Scouts Tab (list focus)", styles::highlight_style())),
+        Line::from(Span::styled(" Scouts Tab", styles::highlight_style())),
         Line::from(vec![
-            Span::styled("  n/r/p/g/a  ", styles::help_key_style()),
-            Span::styled("Sort: [n]ame, [r]ank, [p]atrol, [g]rade, [a]ge", styles::help_desc_style()),
-        ]),
-        Line::from(""),
-        Line::from(Span::styled("Scouts Tab (detail focus)", styles::highlight_style())),
-        Line::from(vec![
-            Span::styled("  d/r/m      ", styles::help_key_style()),
-            Span::styled("View: [d]etails, [r]anks, [m]erit badges", styles::help_desc_style()),
+            Span::styled("  n/r/p/g/a ", styles::help_key_style()),
+            Span::styled("Sort by name/rank/patrol/grade/age", styles::help_desc_style()),
         ]),
         Line::from(vec![
-            Span::styled("  Enter      ", styles::help_key_style()),
-            Span::styled("Load advancement / view requirements", styles::help_desc_style()),
-        ]),
-        Line::from(""),
-        Line::from(Span::styled("Events Tab", styles::highlight_style())),
-        Line::from(vec![
-            Span::styled("  Enter      ", styles::help_key_style()),
-            Span::styled("View event guest list", styles::help_desc_style()),
+            Span::styled("  d/r/m     ", styles::help_key_style()),
+            Span::styled("View details/ranks/merit badges", styles::help_desc_style()),
         ]),
         Line::from(""),
         Line::from(vec![
-            Span::styled("Press ? or Esc to close", styles::muted_style()),
+            Span::styled("       Press ", styles::muted_style()),
+            Span::styled("?", styles::help_key_style()),
+            Span::styled(" or ", styles::muted_style()),
+            Span::styled("Esc", styles::help_key_style()),
+            Span::styled(" to close", styles::muted_style()),
         ]),
     ];
 
     let block = Block::default()
-        .title(" Scoutbook '88 - Help ")
-        .title_style(styles::title_style())
         .borders(Borders::ALL)
-        .border_style(styles::border_style(true));
+        .border_style(styles::border_style(true))
+        .style(Style::default());
 
     let paragraph = Paragraph::new(help_text).block(block);
 
@@ -431,23 +442,3 @@ fn render_quit_overlay(frame: &mut Frame) {
     frame.render_widget(paragraph, area);
 }
 
-/// Create a centered rectangle
-fn centered_rect(percent_x: u16, percent_y: u16, r: Rect) -> Rect {
-    let popup_layout = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([
-            Constraint::Percentage((100 - percent_y) / 2),
-            Constraint::Percentage(percent_y),
-            Constraint::Percentage((100 - percent_y) / 2),
-        ])
-        .split(r);
-
-    Layout::default()
-        .direction(Direction::Horizontal)
-        .constraints([
-            Constraint::Percentage((100 - percent_x) / 2),
-            Constraint::Percentage(percent_x),
-            Constraint::Percentage((100 - percent_x) / 2),
-        ])
-        .split(popup_layout[1])[1]
-}
