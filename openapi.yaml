@@ -1,0 +1,1271 @@
+openapi: 3.0.3
+info:
+  title: Scoutbook/Scouting.org API
+  description: |
+    Unofficial API documentation for the BSA Scoutbook/Scouting.org API.
+    This API is used by the scoutbook-mcp server to interact with Scoutbook data.
+
+    **Note:** This is a reverse-engineered API - there is no official documentation.
+
+    ## API Structure
+    - **Authentication**: JWT bearer tokens via my.scouting.org
+    - **Persons**: Individual member data, training, permissions
+    - **Organizations**: Unit rosters, dashboards, settings
+    - **Registrations**: Recharter validation
+    - **Advancements**: Ranks, merit badges, adventures, awards (reference + youth progress)
+    - **Events**: Calendar and event management
+    - **Activities**: Camping, hiking, service hour logs
+    - **Lookups**: Reference data (states, positions, training courses, etc.)
+
+    ## Common Patterns
+    - Most endpoints require Bearer token authentication
+    - GUIDs are used for person and organization identifiers
+    - User IDs (numeric) are used for youth advancement endpoints
+    - v1 endpoints exist where v2 is not available (noted in descriptions)
+  version: 1.0.0
+  contact:
+    name: Scoutbook MCP
+    url: https://github.com/yourusername/scoutbook-mcp
+
+servers:
+  - url: https://api.scouting.org
+    description: Main API server
+  - url: https://my.scouting.org
+    description: Authentication server
+
+security:
+  - bearerAuth: []
+
+tags:
+  - name: Authentication
+    description: User authentication and token management
+  - name: Persons
+    description: Individual member profiles, training, and permissions
+  - name: Organizations
+    description: Unit rosters, dashboards, and settings
+  - name: Registrations
+    description: Registration and recharter validation
+  - name: Advancements
+    description: Ranks, merit badges, adventures, and awards
+  - name: Events
+    description: Calendar and event management
+  - name: Activities
+    description: Activity logging (camping, hiking, service hours)
+  - name: Lookups
+    description: Reference data for forms and validation
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: JWT token obtained from /api/users/{username}/authenticate
+
+  schemas:
+    RegistrarInfo:
+      type: object
+      description: Registration details for a member
+      properties:
+        dateOfBirth:
+          type: string
+          format: date
+        registrationId:
+          type: integer
+        registrationStatus:
+          type: string
+          enum: [New, Re-Registered]
+        registrationEffectiveDt:
+          type: string
+          format: date
+        registrationExpireDt:
+          type: string
+          format: date
+        renewalStatus:
+          type: string
+          enum: [Current, Eligible to Renew, Opted Out, Renewed]
+        isYearlyMembership:
+          type: boolean
+
+    OrganizationInfo:
+      type: object
+      description: Basic organization/unit information
+      properties:
+        organizationFullName:
+          type: string
+        organizationGuid:
+          type: string
+          format: uuid
+        organizationName:
+          type: string
+        unitType:
+          type: string
+
+    ToolkitItem:
+      type: object
+      description: An organization the user has access to
+      properties:
+        context:
+          type: string
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        orgType:
+          type: string
+          enum: [Units, Councils]
+
+paths:
+  # ==========================================================================
+  # AUTHENTICATION
+  # ==========================================================================
+  /api/users/{username}/authenticate:
+    post:
+      tags: [Authentication]
+      summary: Authenticate user and obtain JWT token
+      description: |
+        Authenticates a user and returns a JWT bearer token for API access.
+        The token includes personGuid, organizationGuid, and userId claims.
+      servers:
+        - url: https://my.scouting.org
+      parameters:
+        - name: username
+          in: path
+          required: true
+          description: BSA member username (usually email)
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/x-www-form-urlencoded:
+            schema:
+              type: object
+              required: [password]
+              properties:
+                password:
+                  type: string
+                  format: password
+      responses:
+        '200':
+          description: Successful authentication - returns JWT token
+
+  # ==========================================================================
+  # PERSONS - Profile & Basic Info
+  # ==========================================================================
+  /persons/v2/{personGuid}/personprofile:
+    get:
+      tags: [Persons]
+      summary: Get detailed person profile
+      description: |
+        Returns comprehensive profile data including:
+        - Eagle Scout status and date
+        - Order of the Arrow membership
+        - Swimming classification
+        - Health/medical record dates
+        - Profile images
+
+        **Use this for detailed member information.**
+      parameters:
+        - name: personGuid
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Detailed person profile
+
+  /persons/v2/{personGuid}/profile:
+    get:
+      tags: [Persons]
+      summary: Get basic person profile
+      description: |
+        Returns basic profile information.
+
+        **Use /personprofile for more detailed data including Eagle status and images.**
+      parameters:
+        - name: personGuid
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Basic person profile
+
+  /persons/v2/{personGuid}/roleTypes:
+    get:
+      tags: [Persons]
+      summary: Get role types for person
+      description: Returns the types of roles this person holds (adult leader, youth, parent, etc.)
+      parameters:
+        - name: personGuid
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: List of role types
+
+  /persons/v2/{personGuid}/subscriptions:
+    get:
+      tags: [Persons]
+      summary: Get notification subscriptions
+      description: Returns the person's notification and communication preferences
+      parameters:
+        - name: personGuid
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Subscription preferences
+
+  /persons/{personGuid}/renewalRelationships:
+    get:
+      tags: [Persons]
+      summary: Get renewal relationships
+      description: |
+        Returns family/household relationships for renewal purposes.
+
+        **Note:** v2 endpoint does not exist - this is the v1 endpoint.
+      parameters:
+        - name: personGuid
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: List of renewal relationships
+
+  # ==========================================================================
+  # PERSONS - Training
+  # ==========================================================================
+  /persons/v2/{personGuid}/trainings/ypt:
+    get:
+      tags: [Persons]
+      summary: Get Youth Protection Training status
+      description: Returns YPT completion and expiration dates
+      parameters:
+        - name: personGuid
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: YPT training status
+
+  /persons/{personGuid}/trainings:
+    get:
+      tags: [Persons]
+      summary: Get complete training history
+      description: |
+        Returns ALL training records for a person (not just YPT).
+        Includes position-specific training, supplemental training, etc.
+
+        **Note:** v1 endpoint - v2 does not exist.
+      parameters:
+        - name: personGuid
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Complete training history
+
+  /persons/v2/{personGuid}/trainings/positionTrainingRequirements:
+    get:
+      tags: [Persons]
+      summary: Get required trainings for current positions
+      description: |
+        Returns training requirements based on the person's registered positions.
+        Shows which trainings are needed and their status (complete/incomplete).
+      parameters:
+        - name: personGuid
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Position training requirements and status
+
+  # ==========================================================================
+  # PERSONS - Tools & Permissions
+  # ==========================================================================
+  /persons/v2/{personGuid}/toolkits:
+    get:
+      tags: [Persons]
+      summary: Get organizations person can access
+      description: |
+        Returns list of organizations (units, councils) the person has access to.
+        Useful for discovering available organizationGuids.
+      parameters:
+        - name: personGuid
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: List of accessible organizations
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  MemberId:
+                    type: integer
+                  items:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/ToolkitItem'
+
+  /persons/v2/{personGuid}/tools:
+    get:
+      tags: [Persons]
+      summary: Get available tools (without org context)
+      description: Returns tools/features available to the person across all organizations
+      parameters:
+        - name: personGuid
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Available tools
+
+  /persons/v2/{personGuid}/{organizationGuid}/tools:
+    get:
+      tags: [Persons]
+      summary: Get available tools for person in specific organization
+      description: Returns tools/features and permissions for the person within a specific unit
+      parameters:
+        - name: personGuid
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: organizationGuid
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Tools and permissions for the organization
+
+  # ==========================================================================
+  # ORGANIZATIONS - Members
+  # ==========================================================================
+  /organizations/v2/units/{organizationGuid}/youths:
+    get:
+      tags: [Organizations]
+      summary: Get youth members (basic)
+      description: |
+        Returns basic youth member list.
+
+        **For registration details (expiration dates), use POST /orgYouths with includeRegistrationDetails: true**
+      parameters:
+        - name: organizationGuid
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Youth members (basic info)
+
+  /organizations/v2/units/{organizationGuid}/adults:
+    get:
+      tags: [Organizations]
+      summary: Get adult members (basic)
+      description: |
+        Returns basic adult member list.
+
+        **For registration/training details, use POST /orgAdults with includeRegistrationDetails: true**
+      parameters:
+        - name: organizationGuid
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Adult members (basic info)
+
+  /organizations/v2/units/{organizationGuid}/parents:
+    get:
+      tags: [Organizations]
+      summary: Get parents/guardians
+      description: Returns parents/guardians associated with youth in the unit
+      parameters:
+        - name: organizationGuid
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Parent/guardian list
+
+  /organizations/v2/units/{organizationGuid}/subUnits:
+    get:
+      tags: [Organizations]
+      summary: Get sub-units (patrols/dens)
+      description: Returns patrols (for troops) or dens (for packs)
+      parameters:
+        - name: organizationGuid
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Sub-unit list
+
+  /organizations/v2/{organizationGuid}/orgYouths:
+    post:
+      tags: [Organizations]
+      summary: Get youth members with full details
+      description: |
+        Returns youth members with optional registration details.
+
+        **Set includeRegistrationDetails: true to get registrarInfo with expiration dates.**
+      parameters:
+        - name: organizationGuid
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                includeRegistrationDetails:
+                  type: boolean
+                  description: Include registrarInfo with registration/expiration dates
+                includeAddressPhoneEmail:
+                  type: boolean
+                  description: Include contact information
+                includeExpired:
+                  type: boolean
+                  description: Include expired/former members
+      responses:
+        '200':
+          description: Youth members with requested details
+
+  /organizations/v2/{organizationGuid}/orgAdults:
+    post:
+      tags: [Organizations]
+      summary: Get adult members with full details
+      description: |
+        Returns adult members with optional registration and training details.
+
+        **Set includeRegistrationDetails: true to get registrarInfo with expiration dates.**
+      parameters:
+        - name: organizationGuid
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                includeRegistrationDetails:
+                  type: boolean
+                  description: Include registrarInfo with registration/expiration dates
+                includeAddressPhoneEmail:
+                  type: boolean
+                  description: Include contact information
+                includeExpired:
+                  type: boolean
+                  description: Include expired/former members
+      responses:
+        '200':
+          description: Adult members with requested details
+
+  # ==========================================================================
+  # ORGANIZATIONS - Profile & Settings
+  # ==========================================================================
+  /organizations/v2/{organizationGuid}/profile:
+    get:
+      tags: [Organizations]
+      summary: Get organization profile
+      description: Returns unit profile including charter org, meeting location, etc.
+      parameters:
+        - name: organizationGuid
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Organization profile
+
+  /organizations/v2/{organizationGuid}/key3:
+    get:
+      tags: [Organizations]
+      summary: Get Key 3 leaders
+      description: |
+        Returns the unit's Key 3 leadership:
+        - Committee Chair
+        - Scoutmaster/Cubmaster/Skipper/Advisor
+        - Charter Organization Representative
+      parameters:
+        - name: organizationGuid
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Key 3 leader information
+
+  /organizations/{organizationGuid}/olrSettings:
+    get:
+      tags: [Organizations]
+      summary: Get online registration settings
+      description: |
+        Returns unit's online registration configuration.
+
+        **Note:** v1 endpoint - no v2 available.
+      parameters:
+        - name: organizationGuid
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Online registration settings
+
+  /organizations/{organizationGuid}/pin:
+    get:
+      tags: [Organizations]
+      summary: Get unit registration PIN
+      description: |
+        Returns the unit's PIN used for new member online registration.
+
+        **Note:** v1 endpoint - no v2 available.
+      parameters:
+        - name: organizationGuid
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Unit registration PIN
+
+  # ==========================================================================
+  # ORGANIZATIONS - Dashboards
+  # ==========================================================================
+  /organizations/v2/{organizationGuid}/advancementDashboard:
+    get:
+      tags: [Organizations]
+      summary: Get advancement dashboard
+      description: Overview of unit advancement activity and statistics
+      parameters:
+        - name: organizationGuid
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Advancement dashboard data
+
+  /organizations/v2/{organizationGuid}/unitAdvancementDashboard:
+    get:
+      tags: [Organizations]
+      summary: Get unit advancement dashboard (alternate)
+      description: |
+        Unit-specific advancement dashboard.
+        May contain different data than /advancementDashboard.
+      parameters:
+        - name: organizationGuid
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Unit advancement dashboard data
+
+  /organizations/v2/{organizationGuid}/renewalDashboard:
+    get:
+      tags: [Organizations]
+      summary: Get renewal dashboard
+      description: Overview of membership renewal status for the unit
+      parameters:
+        - name: organizationGuid
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Renewal dashboard data
+
+  /organizations/v2/{organizationGuid}/unitRenewalStatusDashboard:
+    get:
+      tags: [Organizations]
+      summary: Get unit renewal status dashboard (alternate)
+      description: |
+        Unit-specific renewal status dashboard.
+        May contain different data than /renewalDashboard.
+      parameters:
+        - name: organizationGuid
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Unit renewal status dashboard data
+
+  /organizations/v2/{organizationGuid}/unitActivitiesDashboard:
+    get:
+      tags: [Organizations]
+      summary: Get unit activities dashboard
+      description: Summary of unit activities (camping nights, hiking miles, service hours)
+      parameters:
+        - name: organizationGuid
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Unit activities dashboard data
+
+  /organizations/v2/{organizationGuid}/orgTrainingSummary:
+    get:
+      tags: [Organizations]
+      summary: Get training summary
+      description: Overview of adult leader training status and compliance
+      parameters:
+        - name: organizationGuid
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Training summary data
+
+  /organizations/v2/{organizationGuid}/unitRoundtableAttendance:
+    get:
+      tags: [Organizations]
+      summary: Get roundtable attendance
+      description: Returns roundtable attendance records for unit representatives
+      parameters:
+        - name: organizationGuid
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Roundtable attendance records
+
+  /organizations/v2/{organizationGuid}/orders:
+    get:
+      tags: [Organizations]
+      summary: Get advancement orders
+      description: Returns history of advancement orders placed through the scout shop
+      parameters:
+        - name: organizationGuid
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Order history
+
+  /organizations/v2/{organizationGuid}/advancementsReadyToBeAwarded:
+    post:
+      tags: [Organizations]
+      summary: Get advancements ready to award
+      description: Returns list of completed advancements not yet awarded/purchased
+      parameters:
+        - name: organizationGuid
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+      responses:
+        '200':
+          description: Advancements ready to award
+
+  # ==========================================================================
+  # REGISTRATIONS
+  # ==========================================================================
+  /registrations/v2/{organizationGuid}/validateForRecharter:
+    get:
+      tags: [Registrations]
+      summary: Validate unit for recharter
+      description: |
+        Checks if unit is ready for recharter.
+        Returns any blocking issues or missing requirements.
+      parameters:
+        - name: organizationGuid
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Recharter validation results
+
+  # ==========================================================================
+  # ADVANCEMENTS - Reference Data
+  # ==========================================================================
+  /advancements/ranks:
+    get:
+      tags: [Advancements]
+      summary: Get all ranks
+      description: Returns all BSA ranks across all programs (Cub Scouts, Scouts BSA, Venturing, Sea Scouts)
+      responses:
+        '200':
+          description: List of all ranks
+
+  /advancements/ranks/{rankId}/requirements:
+    get:
+      tags: [Advancements]
+      summary: Get rank requirements
+      description: Returns the requirements for a specific rank
+      parameters:
+        - name: rankId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Rank requirements
+
+  /advancements/meritBadges:
+    get:
+      tags: [Advancements]
+      summary: Get all merit badges
+      description: Returns all merit badges with category, eagle-required status, and details
+      responses:
+        '200':
+          description: List of all merit badges
+
+  /advancements/meritBadges/{meritBadgeId}/requirements:
+    get:
+      tags: [Advancements]
+      summary: Get merit badge requirements
+      description: Returns the current requirements for a specific merit badge
+      parameters:
+        - name: meritBadgeId
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: Merit badge requirements
+
+  /advancements/adventures:
+    get:
+      tags: [Advancements]
+      summary: Get all Cub Scout adventures
+      description: Returns all Cub Scout adventures for all ranks (Lion through Webelos)
+      responses:
+        '200':
+          description: List of all adventures
+
+  /advancements/adventures/{adventureId}/requirements:
+    get:
+      tags: [Advancements]
+      summary: Get adventure requirements
+      description: Returns the requirements for a specific Cub Scout adventure
+      parameters:
+        - name: adventureId
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: Adventure requirements
+
+  /advancements/awards:
+    get:
+      tags: [Advancements]
+      summary: Get all awards
+      description: Returns all special awards (religious, STEM, outdoor, etc.)
+      responses:
+        '200':
+          description: List of all awards
+
+  /advancements/awards/{awardId}/requirements:
+    get:
+      tags: [Advancements]
+      summary: Get award requirements
+      description: Returns the requirements for a specific award
+      parameters:
+        - name: awardId
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: Award requirements
+
+  /advancements/ssElectives:
+    get:
+      tags: [Advancements]
+      summary: Get Sea Scout electives
+      description: Returns Sea Scout program electives
+      responses:
+        '200':
+          description: List of Sea Scout electives
+
+  # ==========================================================================
+  # ADVANCEMENTS - Youth Progress
+  # ==========================================================================
+  /advancements/v2/youth/{userId}/ranks:
+    get:
+      tags: [Advancements]
+      summary: Get youth rank progress
+      description: Returns ranks earned and in-progress for a youth member
+      parameters:
+        - name: userId
+          in: path
+          required: true
+          description: Numeric user ID
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Youth rank progress
+
+  /advancements/v2/youth/{userId}/ranks/{rankId}/requirements:
+    get:
+      tags: [Advancements]
+      summary: Get youth rank requirements progress
+      description: Returns requirement-by-requirement progress for a specific rank
+      parameters:
+        - name: userId
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: rankId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Rank requirements progress
+
+  /advancements/v2/youth/{userId}/meritBadges:
+    get:
+      tags: [Advancements]
+      summary: Get youth merit badges
+      description: Returns merit badges earned and in-progress for a youth member
+      parameters:
+        - name: userId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Youth merit badge progress
+
+  /advancements/v2/youth/{userId}/adventures:
+    get:
+      tags: [Advancements]
+      summary: Get youth adventure progress
+      description: Returns Cub Scout adventure progress for a youth member
+      parameters:
+        - name: userId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Youth adventure progress
+
+  /advancements/v2/youth/{userId}/awards:
+    get:
+      tags: [Advancements]
+      summary: Get youth awards
+      description: Returns special awards earned by a youth member
+      parameters:
+        - name: userId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Youth awards
+
+  /advancements/v2/youth/{userId}/leadershipPositionHistory:
+    get:
+      tags: [Advancements]
+      summary: Get youth leadership history
+      description: Returns history of leadership positions held (PL, SPL, ASPL, etc.)
+      parameters:
+        - name: userId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Leadership position history
+
+  # ==========================================================================
+  # EVENTS
+  # ==========================================================================
+  /advancements/v2/users/{userId}/calendars:
+    get:
+      tags: [Events]
+      summary: Get user calendars
+      description: Returns calendars the user has access to
+      parameters:
+        - name: userId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: User calendars
+
+  /advancements/events:
+    post:
+      tags: [Events]
+      summary: Get events for date range
+      description: Returns events within a date range, optionally filtered by unit
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [fromDate, toDate]
+              properties:
+                fromDate:
+                  type: string
+                  format: date
+                  description: Start date (YYYY-MM-DD)
+                toDate:
+                  type: string
+                  format: date
+                  description: End date (YYYY-MM-DD)
+                unitId:
+                  type: integer
+                  description: Filter by unit ID
+                invitedUserId:
+                  type: integer
+                  description: Filter by invited user
+      responses:
+        '200':
+          description: List of events
+
+  /advancements/v2/events/{eventId}/guests:
+    get:
+      tags: [Events]
+      summary: Get event guests/RSVPs
+      description: Returns guest list and RSVP status for an event
+      parameters:
+        - name: eventId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Event guests and RSVPs
+
+  # ==========================================================================
+  # ACTIVITIES
+  # ==========================================================================
+  /advancements/v2/activities:
+    post:
+      tags: [Activities]
+      summary: Get activity logs
+      description: |
+        Returns activity logs for a person.
+
+        **Activity Types:**
+        - 1 = Service Projects (hours)
+        - 2 = Camping (days, nights, frost points)
+        - 3 = Hikes (miles, elevation)
+        - 4 = Long Cruise (Sea Scouts)
+        - 5 = Eagle Service Project
+      parameters:
+        - name: page
+          in: query
+          schema:
+            type: integer
+            default: 1
+        - name: perPage
+          in: query
+          schema:
+            type: integer
+            default: 100
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [activityTypeId, personGuid, includeActivities]
+              properties:
+                activityTypeId:
+                  type: integer
+                  description: "1=Service, 2=Camping, 3=Hikes, 4=Long Cruise, 5=Eagle Project"
+                personGuid:
+                  type: string
+                  format: uuid
+                includeActivities:
+                  type: string
+                  enum: [both, approved, pending]
+                  description: Filter by approval status
+      responses:
+        '200':
+          description: Activity logs
+
+  /advancements/v2/{userId}/userActivitySummary:
+    get:
+      tags: [Activities]
+      summary: Get activity summary totals
+      description: |
+        Returns aggregated totals for all activity types:
+        - Camping days and nights
+        - Hiking miles
+        - Service hours
+
+        Accepts either numeric userId or personGuid.
+      parameters:
+        - name: userId
+          in: path
+          required: true
+          description: User ID (numeric) or person GUID
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Activity summary with totals
+
+  # ==========================================================================
+  # LOOKUPS - Address
+  # ==========================================================================
+  /lookups/address/countries:
+    get:
+      tags: [Lookups]
+      summary: Get countries
+      description: Returns list of countries for address forms
+      responses:
+        '200':
+          description: List of countries
+
+  /lookups/address/states:
+    get:
+      tags: [Lookups]
+      summary: Get US states
+      description: Returns US states and territories for address forms
+      responses:
+        '200':
+          description: List of states
+
+  # ==========================================================================
+  # LOOKUPS - Person
+  # ==========================================================================
+  /lookups/person/nameSuffixes:
+    get:
+      tags: [Lookups]
+      summary: Get name suffixes
+      description: Returns name suffixes (Jr, Sr, I, II, III, IV, V)
+      responses:
+        '200':
+          description: List of name suffixes
+
+  /lookups/person/titlePrefixes:
+    get:
+      tags: [Lookups]
+      summary: Get title prefixes
+      description: Returns title prefixes (Dr, Mr, Mrs, Ms, Rev)
+      responses:
+        '200':
+          description: List of title prefixes
+
+  /lookups/person/genders:
+    get:
+      tags: [Lookups]
+      summary: Get genders
+      description: Returns gender options (Male, Female)
+      responses:
+        '200':
+          description: List of genders
+
+  # ==========================================================================
+  # LOOKUPS - Communications
+  # ==========================================================================
+  /lookups/communications/communicationTypes:
+    get:
+      tags: [Lookups]
+      summary: Get communication types
+      description: Returns communication types (phone, email, social media)
+      responses:
+        '200':
+          description: List of communication types
+
+  /lookups/communications/mobilePhoneCarrier:
+    get:
+      tags: [Lookups]
+      summary: Get mobile carriers
+      description: Returns mobile phone carriers for SMS notifications
+      responses:
+        '200':
+          description: List of mobile carriers
+
+  # ==========================================================================
+  # LOOKUPS - Organizations
+  # ==========================================================================
+  /lookups/organizations/unitTypes:
+    get:
+      tags: [Lookups]
+      summary: Get unit types
+      description: Returns unit types (Pack, Troop, Team, Crew, Ship, Post)
+      responses:
+        '200':
+          description: List of unit types
+
+  /lookups/organizations/units/specialInterestTypes:
+    get:
+      tags: [Lookups]
+      summary: Get special interest unit types
+      description: Returns special interest designations (STEM Scout, Venturing, Sea Scout, etc.)
+      responses:
+        '200':
+          description: List of special interest types
+
+  # ==========================================================================
+  # LOOKUPS - Trainings
+  # ==========================================================================
+  /lookups/trainings/courses:
+    get:
+      tags: [Lookups]
+      summary: Get training courses
+      description: Returns all BSA training courses (YPT, position-specific, supplemental)
+      responses:
+        '200':
+          description: List of training courses
+
+  # ==========================================================================
+  # LOOKUPS - Advancements
+  # ==========================================================================
+  /lookups/advancements/positions:
+    get:
+      tags: [Lookups]
+      summary: Get BSA positions
+      description: Returns all BSA position types (Scoutmaster, Committee Chair, Den Leader, etc.)
+      responses:
+        '200':
+          description: List of positions
+
+  /lookups/advancements/swimmingClassification:
+    get:
+      tags: [Lookups]
+      summary: Get swimming classifications
+      description: Returns BSA swimming classifications (Nonswimmer, Beginner, Swimmer)
+      responses:
+        '200':
+          description: List of swimming classifications
+
+  /lookups/advancements/meritBadgeCategories:
+    get:
+      tags: [Lookups]
+      summary: Get merit badge categories
+      description: Returns merit badge categories (Agribusiness, Arts and Crafts, Conservation, etc.)
+      responses:
+        '200':
+          description: List of merit badge categories
+
+  /lookups/advancements/activityTypes:
+    get:
+      tags: [Lookups]
+      summary: Get activity types
+      description: Returns activity types (ServiceProjects, Camping, Hikes, Long Cruise, Eagle Service Project)
+      responses:
+        '200':
+          description: List of activity types
+
+  /lookups/advancements/ranks:
+    get:
+      tags: [Lookups]
+      summary: Get ranks (lightweight)
+      description: |
+        Returns ranks by program in a lightweight format.
+
+        **For full rank details, use /advancements/ranks instead.**
+      responses:
+        '200':
+          description: List of ranks
