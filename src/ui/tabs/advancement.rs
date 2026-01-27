@@ -39,7 +39,7 @@ pub fn get_sorted_badges(badges: &[MeritBadgeProgress]) -> Vec<&MeritBadgeProgre
 pub fn render(frame: &mut Frame, app: &App, area: Rect) {
     let chunks = Layout::default()
         .direction(Direction::Horizontal)
-        .constraints([Constraint::Percentage(40), Constraint::Percentage(60)])
+        .constraints([Constraint::Percentage(50), Constraint::Percentage(50)])
         .split(area);
 
     render_scout_list(frame, app, chunks[0]);

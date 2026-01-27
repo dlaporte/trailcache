@@ -142,8 +142,10 @@ impl ScoutRank {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Tab {
     Scouts,
-    Adults,
+    Ranks,
+    Badges,
     Events,
+    Adults,
     Dashboard,
 }
 
@@ -152,18 +154,22 @@ impl Tab {
     pub fn index(&self) -> usize {
         match self {
             Tab::Scouts => 0,
-            Tab::Adults => 1,
-            Tab::Events => 2,
-            Tab::Dashboard => 3,
+            Tab::Ranks => 1,
+            Tab::Badges => 2,
+            Tab::Events => 3,
+            Tab::Adults => 4,
+            Tab::Dashboard => 5,
         }
     }
 
     pub fn from_index(index: usize) -> Self {
         match index {
             0 => Tab::Scouts,
-            1 => Tab::Adults,
-            2 => Tab::Events,
-            3 => Tab::Dashboard,
+            1 => Tab::Ranks,
+            2 => Tab::Badges,
+            3 => Tab::Events,
+            4 => Tab::Adults,
+            5 => Tab::Dashboard,
             _ => Tab::Scouts,
         }
     }
@@ -171,18 +177,22 @@ impl Tab {
     pub fn title(&self) -> &'static str {
         match self {
             Tab::Scouts => "Scouts",
-            Tab::Adults => "Adults",
+            Tab::Ranks => "Ranks",
+            Tab::Badges => "Badges",
             Tab::Events => "Events",
-            Tab::Dashboard => "Dashboard",
+            Tab::Adults => "Adults",
+            Tab::Dashboard => "Unit",
         }
     }
 
     /// Get the next tab (wrapping around)
     pub fn next(&self) -> Self {
         match self {
-            Tab::Scouts => Tab::Adults,
-            Tab::Adults => Tab::Events,
-            Tab::Events => Tab::Dashboard,
+            Tab::Scouts => Tab::Ranks,
+            Tab::Ranks => Tab::Badges,
+            Tab::Badges => Tab::Events,
+            Tab::Events => Tab::Adults,
+            Tab::Adults => Tab::Dashboard,
             Tab::Dashboard => Tab::Scouts,
         }
     }
@@ -191,9 +201,11 @@ impl Tab {
     pub fn prev(&self) -> Self {
         match self {
             Tab::Scouts => Tab::Dashboard,
-            Tab::Adults => Tab::Scouts,
-            Tab::Events => Tab::Adults,
-            Tab::Dashboard => Tab::Events,
+            Tab::Ranks => Tab::Scouts,
+            Tab::Badges => Tab::Ranks,
+            Tab::Events => Tab::Badges,
+            Tab::Adults => Tab::Events,
+            Tab::Dashboard => Tab::Adults,
         }
     }
 }
@@ -433,6 +445,22 @@ pub struct App {
     pub event_selection: usize,
     pub event_guest_selection: usize,
 
+    // Ranks tab state
+    pub ranks_tab_selection: usize,
+    pub ranks_tab_scout_selection: usize,
+    pub ranks_tab_viewing_requirements: bool,
+    pub ranks_tab_requirement_selection: usize,
+    pub ranks_tab_sort_by_count: bool,
+    pub ranks_tab_sort_ascending: bool,
+
+    // Badges tab state
+    pub badges_tab_selection: usize,
+    pub badges_tab_scout_selection: usize,
+    pub badges_tab_viewing_requirements: bool,
+    pub badges_tab_requirement_selection: usize,
+    pub badges_tab_sort_by_count: bool,
+    pub badges_tab_sort_ascending: bool,
+
     // Cached data
     pub youth: Vec<Youth>,
     pub adults: Vec<Adult>,
@@ -444,6 +472,12 @@ pub struct App {
     pub event_guests: HashMap<i64, Vec<EventGuest>>,
     /// Tracks event_guests keys in access order (oldest first) for LRU eviction
     event_guests_order: Vec<i64>,
+
+    /// Merit badge progress for all youth, keyed by user_id
+    pub all_youth_badges: HashMap<i64, Vec<MeritBadgeProgress>>,
+
+    /// Rank progress for all youth, keyed by user_id
+    pub all_youth_ranks: HashMap<i64, Vec<RankProgress>>,
 
     // Unit info (domain types)
     pub key3: Key3Leaders,
@@ -551,6 +585,20 @@ impl App {
             event_selection: 0,
             event_guest_selection: 0,
 
+            ranks_tab_selection: 0,
+            ranks_tab_scout_selection: 0,
+            ranks_tab_viewing_requirements: false,
+            ranks_tab_requirement_selection: 0,
+            ranks_tab_sort_by_count: false,
+            ranks_tab_sort_ascending: true,
+
+            badges_tab_selection: 0,
+            badges_tab_scout_selection: 0,
+            badges_tab_viewing_requirements: false,
+            badges_tab_requirement_selection: 0,
+            badges_tab_sort_by_count: false,
+            badges_tab_sort_ascending: true,
+
             youth: Vec::new(),
             adults: Vec::new(),
             parents: Vec::new(),
@@ -560,6 +608,8 @@ impl App {
             ready_to_award: Vec::new(),
             event_guests: HashMap::new(),
             event_guests_order: Vec::new(),
+            all_youth_badges: HashMap::new(),
+            all_youth_ranks: HashMap::new(),
 
             key3: Default::default(),
             unit_info: None,
@@ -779,6 +829,18 @@ impl App {
             self.commissioners = cached.data;
         }
 
+        // Load per-youth ranks and badges for Ranks/Badges tabs
+        for youth in &self.youth {
+            if let Some(user_id) = youth.user_id {
+                if let Ok(Some(cached)) = self.cache.load_youth_ranks(user_id) {
+                    self.all_youth_ranks.insert(user_id, cached.data);
+                }
+                if let Ok(Some(cached)) = self.cache.load_youth_merit_badges(user_id) {
+                    self.all_youth_badges.insert(user_id, cached.data);
+                }
+            }
+        }
+
         self.cache_ages = self.cache.get_cache_ages();
         Ok(())
     }
@@ -908,6 +970,12 @@ impl App {
             api10.fetch_org_profile(&org_guid),
         );
 
+        // Extract youth user IDs before moving youth_res (for advancement fetch later)
+        let youth_user_ids: Vec<i64> = youth_res
+            .as_ref()
+            .map(|list| list.iter().filter_map(|y| y.user_id).collect())
+            .unwrap_or_default();
+
         // Process and send results
         Self::send_fetch_result(&tx, "Youth", youth_res, RefreshResult::Youth).await;
         Self::send_fetch_result(&tx, "Adults", adults_res, RefreshResult::Adults).await;
@@ -934,8 +1002,65 @@ impl App {
             }
         }
 
+        // Fetch rank and merit badge progress for all youth (for Ranks/Badges tabs)
+        Self::handle_all_youth_advancement_refresh(&tx, &youth_user_ids, &token).await;
+
         info!("Background refresh complete");
         Self::send_result(&tx, RefreshResult::RefreshComplete).await;
+    }
+
+    /// Fetch rank and merit badge progress for all youth members.
+    /// This populates all_youth_ranks and all_youth_badges HashMaps for the Ranks/Badges tabs.
+    async fn handle_all_youth_advancement_refresh(
+        tx: &mpsc::Sender<RefreshResult>,
+        user_ids: &[i64],
+        token: &Arc<String>,
+    ) {
+        if user_ids.is_empty() {
+            return;
+        }
+
+        debug!(count = user_ids.len(), "Fetching ranks and badges for all youth");
+
+        // Create API client
+        let api = match ApiClient::new() {
+            Ok(mut api) => {
+                api.set_token((**token).clone());
+                api
+            }
+            Err(e) => {
+                error!(error = %e, "Failed to create API client for youth advancement");
+                return;
+            }
+        };
+
+        // Fetch ranks and badges for all youth with limited concurrency
+        const MAX_CONCURRENT: usize = 5;
+        for chunk in user_ids.chunks(MAX_CONCURRENT) {
+            let futures: Vec<_> = chunk
+                .iter()
+                .map(|&user_id| {
+                    let api = api.clone();
+                    async move {
+                        let ranks = api.fetch_youth_ranks(user_id).await.ok();
+                        let badges = api.fetch_youth_merit_badges(user_id).await.ok();
+                        (user_id, ranks, badges)
+                    }
+                })
+                .collect();
+
+            let results = futures::future::join_all(futures).await;
+            for (user_id, ranks, badges) in results {
+                if let Some(ranks) = ranks {
+                    Self::send_result(tx, RefreshResult::YouthRanks(user_id, ranks)).await;
+                }
+                if let Some(badges) = badges {
+                    Self::send_result(tx, RefreshResult::YouthMeritBadges(user_id, badges)).await;
+                }
+            }
+        }
+
+        debug!("All youth advancement fetching complete");
     }
 
     /// Helper to send a successful fetch result or an error
@@ -1232,12 +1357,16 @@ impl App {
                 if let Err(e) = self.cache.save_youth_ranks(user_id, &data) {
                     warn!(error = %e, "Failed to cache youth ranks");
                 }
+                // Store in all_youth_ranks for the Ranks tab aggregate view
+                self.all_youth_ranks.insert(user_id, data.clone());
                 self.selected_youth_ranks = data;
             }
             RefreshResult::YouthMeritBadges(user_id, data) => {
                 if let Err(e) = self.cache.save_youth_merit_badges(user_id, &data) {
                     warn!(error = %e, "Failed to cache youth merit badges");
                 }
+                // Store in all_youth_badges for the Badges tab aggregate view
+                self.all_youth_badges.insert(user_id, data.clone());
                 self.selected_youth_badges = data;
             }
             RefreshResult::RankRequirements(data) => {
@@ -1344,6 +1473,18 @@ impl App {
                     }
                     if let Ok(data) = api.fetch_advancement_dashboard(&org_guid).await {
                         Self::send_result(&tx, RefreshResult::AdvancementDashboard(data)).await;
+                    }
+                }
+                Tab::Ranks => {
+                    // Ranks tab uses youth data
+                    if let Ok(data) = api.fetch_youth(&org_guid).await {
+                        Self::send_result(&tx, RefreshResult::Youth(data)).await;
+                    }
+                }
+                Tab::Badges => {
+                    // Badges tab uses ready-to-award data
+                    if let Ok(data) = api.fetch_ready_to_award(&org_guid).await {
+                        Self::send_result(&tx, RefreshResult::ReadyToAward(data)).await;
                     }
                 }
             }

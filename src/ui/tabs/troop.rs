@@ -120,7 +120,7 @@ fn render_rank_overview(frame: &mut Frame, app: &App, area: Rect) {
     ]));
 
     let block = Block::default()
-        .title(" Scouts ")
+        .title(" Ranks ")
         .title_style(styles::title_style())
         .borders(Borders::ALL)
         .border_style(styles::border_style(false));
@@ -256,8 +256,14 @@ fn render_renewals(frame: &mut Frame, app: &App, area: Rect) {
 }
 
 fn render_troop_info(frame: &mut Frame, app: &App, area: Rect) {
+    // Use unit name as title, fallback to "Unit"
+    let title = app.unit_info.as_ref()
+        .and_then(|u| u.name.as_ref())
+        .map(|n| format!(" {} ", n))
+        .unwrap_or_else(|| " Unit ".to_string());
+
     let block = Block::default()
-        .title(" Unit ")
+        .title(title)
         .title_style(styles::title_style())
         .borders(Borders::ALL)
         .border_style(styles::border_style(false));
@@ -277,14 +283,6 @@ fn render_troop_info(frame: &mut Frame, app: &App, area: Rect) {
 
 fn render_unit_left(frame: &mut Frame, app: &App, area: Rect) {
     let mut lines = vec![];
-
-    // Unit name from unit info
-    if let Some(ref unit_info) = app.unit_info {
-        if let Some(ref name) = unit_info.name {
-            lines.push(Line::from(Span::styled(name.as_str(), styles::title_style())));
-            lines.push(Line::from(""));
-        }
-    }
 
     // Key 3 from API
     if let Some(ref sm) = app.key3.scoutmaster {

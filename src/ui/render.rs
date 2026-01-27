@@ -9,7 +9,7 @@ use ratatui::{
 use crate::app::{App, AppState, EventDetailView, LoginFocus, ScoutDetailView, Tab};
 
 use super::styles;
-use super::tabs::{events, roster, troop};
+use super::tabs::{badges, events, ranks, roster, troop};
 
 pub fn render(frame: &mut Frame, app: &App) {
     let chunks = Layout::default()
@@ -68,9 +68,11 @@ fn render_tabs(frame: &mut Frame, app: &App, area: Rect) {
     // Build main tabs text
     let main_tabs = vec![
         ("[1] Scouts", app.current_tab == Tab::Scouts),
-        ("[2] Adults", app.current_tab == Tab::Adults),
-        ("[3] Events", app.current_tab == Tab::Events),
-        ("[4] Dashboard", app.current_tab == Tab::Dashboard),
+        ("[2] Ranks", app.current_tab == Tab::Ranks),
+        ("[3] Badges", app.current_tab == Tab::Badges),
+        ("[4] Events", app.current_tab == Tab::Events),
+        ("[5] Adults", app.current_tab == Tab::Adults),
+        ("[6] Unit", app.current_tab == Tab::Dashboard),
     ];
 
     let mut spans = vec![Span::raw(" ")];
@@ -136,6 +138,8 @@ fn render_main_content(frame: &mut Frame, app: &App, area: Rect) {
         Tab::Adults => roster::render_adults(frame, app, area),
         Tab::Events => events::render(frame, app, area),
         Tab::Dashboard => troop::render(frame, app, area),
+        Tab::Ranks => ranks::render(frame, app, area),
+        Tab::Badges => badges::render(frame, app, area),
     }
 }
 

@@ -15,7 +15,7 @@ use crate::ui::tabs::advancement::get_sorted_badges;
 pub fn render_scouts(frame: &mut Frame, app: &App, area: Rect) {
     let chunks = Layout::default()
         .direction(Direction::Horizontal)
-        .constraints([Constraint::Percentage(60), Constraint::Percentage(40)])
+        .constraints([Constraint::Percentage(50), Constraint::Percentage(50)])
         .split(area);
 
     render_scout_table(frame, app, chunks[0]);
@@ -739,7 +739,7 @@ fn summarize_requirement(s: &str) -> String {
 pub fn render_adults(frame: &mut Frame, app: &App, area: Rect) {
     let chunks = Layout::default()
         .direction(Direction::Horizontal)
-        .constraints([Constraint::Percentage(60), Constraint::Percentage(40)])
+        .constraints([Constraint::Percentage(50), Constraint::Percentage(50)])
         .split(area);
 
     render_adult_table(frame, app, chunks[0]);

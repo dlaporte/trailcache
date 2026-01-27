@@ -109,14 +109,22 @@ pub async fn handle_input(app: &mut App, key: KeyEvent) -> Result<bool> {
             app.focus = Focus::List;
         }
         KeyCode::Char('2') => {
-            app.current_tab = Tab::Adults;
+            app.current_tab = Tab::Ranks;
             app.focus = Focus::List;
         }
         KeyCode::Char('3') => {
-            app.current_tab = Tab::Events;
+            app.current_tab = Tab::Badges;
             app.focus = Focus::List;
         }
         KeyCode::Char('4') => {
+            app.current_tab = Tab::Events;
+            app.focus = Focus::List;
+        }
+        KeyCode::Char('5') => {
+            app.current_tab = Tab::Adults;
+            app.focus = Focus::List;
+        }
+        KeyCode::Char('6') => {
             app.current_tab = Tab::Dashboard;
             app.focus = Focus::List;
         }
@@ -179,6 +187,16 @@ pub async fn handle_input(app: &mut App, key: KeyEvent) -> Result<bool> {
             } else if app.current_tab == Tab::Events && app.event_detail_view == EventDetailView::Rsvp {
                 // Go back to details view from RSVP
                 app.event_detail_view = EventDetailView::Details;
+            } else if app.current_tab == Tab::Ranks && app.ranks_tab_viewing_requirements {
+                // Go back from requirements view to scout list
+                app.ranks_tab_viewing_requirements = false;
+                app.selected_rank_requirements.clear();
+                app.ranks_tab_requirement_selection = 0;
+            } else if app.current_tab == Tab::Badges && app.badges_tab_viewing_requirements {
+                // Go back from requirements view to scout list
+                app.badges_tab_viewing_requirements = false;
+                app.selected_badge_requirements.clear();
+                app.badges_tab_requirement_selection = 0;
             } else {
                 app.search_query.clear();
                 app.focus = Focus::List;
@@ -191,6 +209,8 @@ pub async fn handle_input(app: &mut App, key: KeyEvent) -> Result<bool> {
                 Tab::Adults => handle_adults_input(app, key).await?,
                 Tab::Events => handle_events_input(app, key).await?,
                 Tab::Dashboard => handle_dashboard_input(app, key).await?,
+                Tab::Ranks => handle_ranks_input(app, key).await?,
+                Tab::Badges => handle_badges_input(app, key).await?,
             }
         }
     }
@@ -675,5 +695,267 @@ async fn handle_events_input(app: &mut App, key: KeyEvent) -> Result<()> {
 async fn handle_dashboard_input(_app: &mut App, _key: KeyEvent) -> Result<()> {
     // Dashboard tab is display-only, no special input handling needed
     // Navigation between tabs is handled by global keys
+    Ok(())
+}
+
+async fn handle_ranks_input(app: &mut App, key: KeyEvent) -> Result<()> {
+    use crate::ui::tabs::ranks::{get_ranks_with_scouts, get_rank_list};
+
+    let rank_list = get_rank_list(&app.youth, &app.all_youth_ranks, app.ranks_tab_sort_by_count, app.ranks_tab_sort_ascending);
+    let grouped = get_ranks_with_scouts(&app.youth, &app.all_youth_ranks);
+    let max_rank = rank_list.len().saturating_sub(1);
+
+    // Get scouts for current selection using sorted list
+    let selected_rank_name = rank_list.get(app.ranks_tab_selection)
+        .map(|(name, _)| name.as_str())
+        .unwrap_or("");
+    let max_scout = grouped.iter()
+        .find(|(name, _)| name == selected_rank_name)
+        .map(|(_, scouts)| scouts.len().saturating_sub(1))
+        .unwrap_or(0);
+
+    match app.focus {
+        Focus::List => {
+            match key.code {
+                KeyCode::Char('j') | KeyCode::Down => {
+                    app.ranks_tab_selection = (app.ranks_tab_selection + 1).min(max_rank);
+                    app.ranks_tab_scout_selection = 0;
+                }
+                KeyCode::Char('k') | KeyCode::Up => {
+                    app.ranks_tab_selection = app.ranks_tab_selection.saturating_sub(1);
+                    app.ranks_tab_scout_selection = 0;
+                }
+                KeyCode::Enter => {
+                    app.focus = Focus::Detail;
+                    app.ranks_tab_scout_selection = 0;
+                }
+                KeyCode::Home => {
+                    app.ranks_tab_selection = 0;
+                    app.ranks_tab_scout_selection = 0;
+                }
+                KeyCode::End => {
+                    app.ranks_tab_selection = max_rank;
+                    app.ranks_tab_scout_selection = 0;
+                }
+                KeyCode::Char('n') => {
+                    if !app.ranks_tab_sort_by_count {
+                        // Already sorting by name, toggle direction
+                        app.ranks_tab_sort_ascending = !app.ranks_tab_sort_ascending;
+                    } else {
+                        // Switch to sorting by name
+                        app.ranks_tab_sort_by_count = false;
+                        app.ranks_tab_sort_ascending = true;
+                    }
+                    app.ranks_tab_selection = 0;
+                    app.ranks_tab_scout_selection = 0;
+                }
+                KeyCode::Char('c') => {
+                    if app.ranks_tab_sort_by_count {
+                        // Already sorting by count, toggle direction
+                        app.ranks_tab_sort_ascending = !app.ranks_tab_sort_ascending;
+                    } else {
+                        // Switch to sorting by count
+                        app.ranks_tab_sort_by_count = true;
+                        app.ranks_tab_sort_ascending = false; // Default descending for count
+                    }
+                    app.ranks_tab_selection = 0;
+                    app.ranks_tab_scout_selection = 0;
+                }
+                _ => {}
+            }
+        }
+        Focus::Detail => {
+            if app.ranks_tab_viewing_requirements {
+                // Navigate within requirements
+                let max_req = app.selected_rank_requirements.len().saturating_sub(1);
+                match key.code {
+                    KeyCode::Char('j') | KeyCode::Down => {
+                        app.ranks_tab_requirement_selection = (app.ranks_tab_requirement_selection + 1).min(max_req);
+                    }
+                    KeyCode::Char('k') | KeyCode::Up => {
+                        app.ranks_tab_requirement_selection = app.ranks_tab_requirement_selection.saturating_sub(1);
+                    }
+                    KeyCode::Esc => {
+                        // Exit requirements view but stay in right panel
+                        app.ranks_tab_viewing_requirements = false;
+                        app.selected_rank_requirements.clear();
+                        app.ranks_tab_requirement_selection = 0;
+                        app.ranks_tab_scout_selection = 0;
+                    }
+                    _ => {}
+                }
+            } else {
+                // Navigate scout list
+                match key.code {
+                    KeyCode::Char('j') | KeyCode::Down => {
+                        app.ranks_tab_scout_selection = (app.ranks_tab_scout_selection + 1).min(max_scout);
+                    }
+                    KeyCode::Char('k') | KeyCode::Up => {
+                        app.ranks_tab_scout_selection = app.ranks_tab_scout_selection.saturating_sub(1);
+                    }
+                    KeyCode::Enter => {
+                        // Load rank requirements for selected scout
+                        if let Some(scouts) = grouped.iter()
+                            .find(|(name, _)| name == selected_rank_name)
+                            .map(|(_, s)| s)
+                        {
+                            if let Some(srp) = scouts.get(app.ranks_tab_scout_selection) {
+                                if let (Some(user_id), Some(rank)) = (srp.youth.user_id, &srp.rank) {
+                                    // Fetch requirements for this specific rank
+                                    app.fetch_rank_requirements(user_id, rank.rank_id).await;
+                                    app.ranks_tab_viewing_requirements = true;
+                                    app.ranks_tab_requirement_selection = 0;
+                                }
+                            }
+                        }
+                    }
+                    KeyCode::Esc => {
+                        app.focus = Focus::List;
+                    }
+                    KeyCode::Home => {
+                        app.ranks_tab_scout_selection = 0;
+                    }
+                    KeyCode::End => {
+                        app.ranks_tab_scout_selection = max_scout;
+                    }
+                    _ => {}
+                }
+            }
+        }
+        _ => {}
+    }
+    Ok(())
+}
+
+async fn handle_badges_input(app: &mut App, key: KeyEvent) -> Result<()> {
+    use crate::ui::tabs::badges::{get_badges_with_scouts, get_badge_list};
+
+    let badge_list = get_badge_list(&app.youth, &app.all_youth_badges, app.badges_tab_sort_by_count, app.badges_tab_sort_ascending);
+    let grouped = get_badges_with_scouts(&app.youth, &app.all_youth_badges);
+    let max_badge = badge_list.len().saturating_sub(1);
+
+    // Get scouts for current selection using sorted list
+    let selected_badge_name = badge_list.get(app.badges_tab_selection)
+        .map(|(name, _, _)| name.as_str())
+        .unwrap_or("");
+    let max_scout = grouped.iter()
+        .find(|(name, _, _)| name == selected_badge_name)
+        .map(|(_, _, scouts)| scouts.len().saturating_sub(1))
+        .unwrap_or(0);
+
+    match app.focus {
+        Focus::List => {
+            match key.code {
+                KeyCode::Char('j') | KeyCode::Down => {
+                    if !badge_list.is_empty() {
+                        app.badges_tab_selection = (app.badges_tab_selection + 1).min(max_badge);
+                        app.badges_tab_scout_selection = 0;
+                    }
+                }
+                KeyCode::Char('k') | KeyCode::Up => {
+                    app.badges_tab_selection = app.badges_tab_selection.saturating_sub(1);
+                    app.badges_tab_scout_selection = 0;
+                }
+                KeyCode::Enter => {
+                    if !badge_list.is_empty() {
+                        app.focus = Focus::Detail;
+                        app.badges_tab_scout_selection = 0;
+                    }
+                }
+                KeyCode::Home => {
+                    app.badges_tab_selection = 0;
+                    app.badges_tab_scout_selection = 0;
+                }
+                KeyCode::End => {
+                    app.badges_tab_selection = max_badge;
+                    app.badges_tab_scout_selection = 0;
+                }
+                KeyCode::Char('n') => {
+                    if !app.badges_tab_sort_by_count {
+                        // Already sorting by name, toggle direction
+                        app.badges_tab_sort_ascending = !app.badges_tab_sort_ascending;
+                    } else {
+                        // Switch to sorting by name
+                        app.badges_tab_sort_by_count = false;
+                        app.badges_tab_sort_ascending = true;
+                    }
+                    app.badges_tab_selection = 0;
+                    app.badges_tab_scout_selection = 0;
+                }
+                KeyCode::Char('c') => {
+                    if app.badges_tab_sort_by_count {
+                        // Already sorting by count, toggle direction
+                        app.badges_tab_sort_ascending = !app.badges_tab_sort_ascending;
+                    } else {
+                        // Switch to sorting by count
+                        app.badges_tab_sort_by_count = true;
+                        app.badges_tab_sort_ascending = false; // Default descending for count
+                    }
+                    app.badges_tab_selection = 0;
+                    app.badges_tab_scout_selection = 0;
+                }
+                _ => {}
+            }
+        }
+        Focus::Detail => {
+            if app.badges_tab_viewing_requirements {
+                // Navigate within requirements
+                let max_req = app.selected_badge_requirements.len().saturating_sub(1);
+                match key.code {
+                    KeyCode::Char('j') | KeyCode::Down => {
+                        app.badges_tab_requirement_selection = (app.badges_tab_requirement_selection + 1).min(max_req);
+                    }
+                    KeyCode::Char('k') | KeyCode::Up => {
+                        app.badges_tab_requirement_selection = app.badges_tab_requirement_selection.saturating_sub(1);
+                    }
+                    KeyCode::Esc => {
+                        // Exit requirements view but stay in right panel
+                        app.badges_tab_viewing_requirements = false;
+                        app.selected_badge_requirements.clear();
+                        app.badges_tab_requirement_selection = 0;
+                        app.badges_tab_scout_selection = 0;
+                    }
+                    _ => {}
+                }
+            } else {
+                // Navigate scout list
+                match key.code {
+                    KeyCode::Char('j') | KeyCode::Down => {
+                        app.badges_tab_scout_selection = (app.badges_tab_scout_selection + 1).min(max_scout);
+                    }
+                    KeyCode::Char('k') | KeyCode::Up => {
+                        app.badges_tab_scout_selection = app.badges_tab_scout_selection.saturating_sub(1);
+                    }
+                    KeyCode::Enter => {
+                        // Load badge requirements for selected scout
+                        if let Some(scouts) = grouped.iter()
+                            .find(|(name, _, _)| name == selected_badge_name)
+                            .map(|(_, _, s)| s)
+                        {
+                            if let Some(sbp) = scouts.get(app.badges_tab_scout_selection) {
+                                if let Some(user_id) = sbp.youth.user_id {
+                                    // Fetch requirements for this specific badge
+                                    app.fetch_badge_requirements(user_id, sbp.badge.id).await;
+                                    app.badges_tab_viewing_requirements = true;
+                                    app.badges_tab_requirement_selection = 0;
+                                }
+                            }
+                        }
+                    }
+                    KeyCode::Esc => {
+                        app.focus = Focus::List;
+                    }
+                    KeyCode::Home => {
+                        app.badges_tab_scout_selection = 0;
+                    }
+                    KeyCode::End => {
+                        app.badges_tab_scout_selection = max_scout;
+                    }
+                    _ => {}
+                }
+            }
+        }
+        _ => {}
+    }
     Ok(())
 }
