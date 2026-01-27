@@ -7,7 +7,7 @@ use ratatui::{
 
 use crate::app::{App, Focus};
 use crate::ui::styles;
-use crate::utils::format_phone;
+use crate::utils::format::format_phone;
 
 pub fn render(frame: &mut Frame, app: &App, area: Rect) {
     let chunks = Layout::default()
@@ -32,7 +32,7 @@ fn render_patrol_list(frame: &mut Frame, app: &App, area: Rect) {
                 count
             ));
 
-            let style = if i == app.patrol_selection {
+            let style = if i == app.adults_selection {
                 styles::selected_style()
             } else {
                 styles::list_item_style()
@@ -52,13 +52,13 @@ fn render_patrol_list(frame: &mut Frame, app: &App, area: Rect) {
     let list = List::new(items).block(block);
 
     let mut state = ListState::default();
-    state.select(Some(app.patrol_selection));
+    state.select(Some(app.adults_selection));
 
     frame.render_stateful_widget(list, area, &mut state);
 }
 
 fn render_patrol_members(frame: &mut Frame, app: &App, area: Rect) {
-    let selected_patrol = app.patrols.get(app.patrol_selection);
+    let selected_patrol = app.patrols.get(app.adults_selection);
 
     let focused = matches!(app.focus, Focus::Detail);
 

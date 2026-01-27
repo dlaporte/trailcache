@@ -15,6 +15,7 @@ use ratatui::{
 use crate::app::{App, Focus};
 use crate::models::{MeritBadgeProgress, Youth};
 use crate::ui::styles;
+use crate::utils::{strip_html, truncate};
 
 /// A scout working on a badge with their progress info
 #[derive(Clone)]
@@ -127,13 +128,13 @@ pub fn render(frame: &mut Frame, app: &App, area: Rect) {
 }
 
 fn render_badge_list(frame: &mut Frame, app: &App, area: Rect) {
-    let badge_list = get_badge_list(&app.youth, &app.all_youth_badges, app.badges_tab_sort_by_count, app.badges_tab_sort_ascending);
+    let badge_list = get_badge_list(&app.youth, &app.all_youth_badges, app.badges_sort_by_count, app.badges_sort_ascending);
     let focused = matches!(app.focus, Focus::List);
 
     // Sort indicators for column headers
-    let arrow = if app.badges_tab_sort_ascending { " ▲" } else { " ▼" };
-    let name_indicator = if !app.badges_tab_sort_by_count { arrow } else { "" };
-    let count_indicator = if app.badges_tab_sort_by_count { arrow } else { "" };
+    let arrow = if app.badges_sort_ascending { " ▲" } else { " ▼" };
+    let name_indicator = if !app.badges_sort_by_count { arrow } else { "" };
+    let count_indicator = if app.badges_sort_by_count { arrow } else { "" };
 
     let header_cells = [
         Cell::from(format!("Name{}", name_indicator)),
@@ -151,7 +152,7 @@ fn render_badge_list(frame: &mut Frame, app: &App, area: Rect) {
         ])]
     } else {
         badge_list.iter().enumerate().map(|(i, (name, is_eagle, count))| {
-            let style = if i == app.badges_tab_selection {
+            let style = if i == app.badges_selection {
                 styles::selected_style()
             } else {
                 styles::list_item_style()
@@ -186,18 +187,18 @@ fn render_badge_list(frame: &mut Frame, app: &App, area: Rect) {
         .row_highlight_style(styles::selected_style());
 
     let mut state = TableState::default();
-    state.select(Some(app.badges_tab_selection));
+    state.select(Some(app.badges_selection));
 
     frame.render_stateful_widget(table, area, &mut state);
 }
 
 fn render_scout_list(frame: &mut Frame, app: &App, area: Rect) {
     let grouped = get_badges_with_scouts(&app.youth, &app.all_youth_badges);
-    let badge_list = get_badge_list(&app.youth, &app.all_youth_badges, app.badges_tab_sort_by_count, app.badges_tab_sort_ascending);
+    let badge_list = get_badge_list(&app.youth, &app.all_youth_badges, app.badges_sort_by_count, app.badges_sort_ascending);
     let focused = matches!(app.focus, Focus::Detail);
 
     // Get selected badge name from sorted list, then find scouts
-    let selected_badge_name = badge_list.get(app.badges_tab_selection)
+    let selected_badge_name = badge_list.get(app.badges_selection)
         .map(|(name, _, _)| name.as_str())
         .unwrap_or("");
 
@@ -207,7 +208,7 @@ fn render_scout_list(frame: &mut Frame, app: &App, area: Rect) {
         .unwrap_or_default();
 
     // If viewing requirements, show that instead
-    if app.badges_tab_viewing_requirements {
+    if app.badges_viewing_requirements {
         render_requirements_view(frame, app, area, focused);
         return;
     }
@@ -228,7 +229,7 @@ fn render_scout_list(frame: &mut Frame, app: &App, area: Rect) {
         ])]
     } else {
         scouts.iter().enumerate().map(|(i, sbp)| {
-            let style = if i == app.badges_tab_scout_selection && focused {
+            let style = if i == app.badges_scout_selection && focused {
                 styles::selected_style()
             } else {
                 styles::list_item_style()
@@ -276,7 +277,7 @@ fn render_scout_list(frame: &mut Frame, app: &App, area: Rect) {
 
     let mut state = TableState::default();
     if focused {
-        state.select(Some(app.badges_tab_scout_selection));
+        state.select(Some(app.badges_scout_selection));
     }
 
     frame.render_stateful_widget(table, area, &mut state);
@@ -284,10 +285,10 @@ fn render_scout_list(frame: &mut Frame, app: &App, area: Rect) {
 
 fn render_requirements_view(frame: &mut Frame, app: &App, area: Rect, focused: bool) {
     let grouped = get_badges_with_scouts(&app.youth, &app.all_youth_badges);
-    let badge_list = get_badge_list(&app.youth, &app.all_youth_badges, app.badges_tab_sort_by_count, app.badges_tab_sort_ascending);
+    let badge_list = get_badge_list(&app.youth, &app.all_youth_badges, app.badges_sort_by_count, app.badges_sort_ascending);
 
     // Get selected badge info from sorted list
-    let selected_badge_name = badge_list.get(app.badges_tab_selection)
+    let selected_badge_name = badge_list.get(app.badges_selection)
         .map(|(name, _, _)| name.as_str())
         .unwrap_or("");
 
@@ -296,7 +297,7 @@ fn render_requirements_view(frame: &mut Frame, app: &App, area: Rect, focused: b
         .map(|(_, _, scouts)| scouts.iter().collect())
         .unwrap_or_default();
 
-    let selected_scout = scouts.get(app.badges_tab_scout_selection);
+    let selected_scout = scouts.get(app.badges_scout_selection);
 
     let mut lines = vec![];
 
@@ -325,7 +326,7 @@ fn render_requirements_view(frame: &mut Frame, app: &App, area: Rect, focused: b
 
         // Show requirements
         for (i, req) in app.selected_badge_requirements.iter().enumerate() {
-            let is_selected = i == app.badges_tab_requirement_selection;
+            let is_selected = i == app.badges_requirement_selection;
             let check = if req.is_completed() { "✓" } else { "○" };
             let check_style = if req.is_completed() { styles::success_style() } else { styles::muted_style() };
 
@@ -370,25 +371,3 @@ fn render_requirements_view(frame: &mut Frame, app: &App, area: Rect, focused: b
     frame.render_widget(paragraph, area);
 }
 
-/// Strip HTML tags from a string
-fn strip_html(s: &str) -> String {
-    let mut result = String::new();
-    let mut in_tag = false;
-    for c in s.chars() {
-        match c {
-            '<' => in_tag = true,
-            '>' => in_tag = false,
-            _ if !in_tag => result.push(c),
-            _ => {}
-        }
-    }
-    result.split_whitespace().collect::<Vec<_>>().join(" ")
-}
-
-fn truncate(s: &str, max_len: usize) -> String {
-    if s.len() <= max_len {
-        s.to_string()
-    } else {
-        format!("{}…", &s[..max_len.saturating_sub(1)])
-    }
-}

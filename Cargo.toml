@@ -1,10 +1,10 @@
 [package]
-name = "scoutbook88"
+name = "trailcache"
 version = "0.1.7"
 edition = "2021"
-description = "A blazing-fast TUI for Scoutbook data"
+description = "A blazing-fast TUI for Scout troop management - works offline"
 authors = ["David LaPorte"]
-repository = "https://github.com/dlaporte/scoutbook88"
+repository = "https://github.com/dlaporte/trailcache"
 license = "MIT"
 
 [dependencies]

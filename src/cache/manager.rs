@@ -243,6 +243,45 @@ impl CacheManager {
         self.save("commissioners", &commissioners)
     }
 
+    // ===== Rank Requirements =====
+
+    pub fn load_rank_requirements(
+        &self,
+        user_id: i64,
+        rank_id: i64,
+    ) -> Result<Option<CachedData<Vec<crate::models::RankRequirement>>>> {
+        self.load(&format!("rank_reqs_{}_{}", user_id, rank_id))
+    }
+
+    pub fn save_rank_requirements(
+        &self,
+        user_id: i64,
+        rank_id: i64,
+        requirements: &[crate::models::RankRequirement],
+    ) -> Result<()> {
+        self.save(&format!("rank_reqs_{}_{}", user_id, rank_id), &requirements)
+    }
+
+    // ===== Badge Requirements =====
+
+    pub fn load_badge_requirements(
+        &self,
+        user_id: i64,
+        badge_id: i64,
+    ) -> Result<Option<CachedData<(Vec<crate::models::MeritBadgeRequirement>, Option<String>)>>> {
+        self.load(&format!("badge_reqs_{}_{}", user_id, badge_id))
+    }
+
+    pub fn save_badge_requirements(
+        &self,
+        user_id: i64,
+        badge_id: i64,
+        requirements: &[crate::models::MeritBadgeRequirement],
+        version: &Option<String>,
+    ) -> Result<()> {
+        self.save(&format!("badge_reqs_{}_{}", user_id, badge_id), &(requirements, version))
+    }
+
     // ===== Cache Age Information =====
 
     /// Helper to load cache and log errors without failing
@@ -326,10 +365,8 @@ impl CacheAges {
         ];
 
         // Find any that has a value
-        for age in ages.iter() {
-            if let Some(a) = age {
-                return a.clone();
-            }
+        for a in ages.iter().copied().flatten() {
+            return a.clone();
         }
 
         "never".to_string()

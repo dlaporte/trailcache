@@ -4,7 +4,7 @@
 use anyhow::{Context, Result};
 use keyring::Entry;
 
-const SERVICE_NAME: &str = "scoutbook-tui";
+const SERVICE_NAME: &str = "trailcache";
 
 pub struct CredentialStore;
 

@@ -1,7 +1,7 @@
 //! Local caching module for offline data access.
 //!
 //! This module provides the `CacheManager` for storing and retrieving
-//! Scoutbook data locally. Data is cached in JSON format and considered
+//! troop data locally. Data is cached in JSON format and considered
 //! stale after 60 minutes.
 //!
 //! Cached data types include:

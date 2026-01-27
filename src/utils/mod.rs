@@ -1,6 +1,6 @@
-// Allow dead code: Utility module for future use
-#[allow(dead_code)]
+//! Utility functions for string formatting and manipulation.
+
 pub mod format;
 
-#[allow(unused_imports)]
-pub use format::format_phone;
+// Re-export commonly used functions at module level
+pub use format::{cmp_ignore_case, contains_ignore_case, strip_html, truncate};

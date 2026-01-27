@@ -125,4 +125,9 @@ impl Commissioner {
         .trim()
         .to_string()
     }
+
+    #[allow(dead_code)] // Used in tests
+    pub fn position_display(&self) -> &str {
+        self.position.as_deref().unwrap_or("Unknown")
+    }
 }

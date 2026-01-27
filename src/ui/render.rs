@@ -9,7 +9,36 @@ use ratatui::{
 use crate::app::{App, AppState, EventDetailView, LoginFocus, ScoutDetailView, Tab};
 
 use super::styles;
-use super::tabs::{badges, events, ranks, roster, troop};
+use super::tabs::{badges, events, ranks, roster, unit};
+
+// ============================================================================
+// Overlay Constants and Helpers
+// ============================================================================
+
+/// Standard overlay width (52 total = 50 interior with borders)
+const OVERLAY_WIDTH: u16 = 52;
+
+/// ASCII art logo lines (centered for 50-char interior)
+const LOGO_LINE_1: &str = "      ╔╦╗ ╦═╗ ╔═╗ ╦ ╦   ╔═╗ ╔═╗ ╔═╗ ╦ ╦ ╔═╗";
+const LOGO_LINE_2: &str = "       ║  ╠╦╝ ╠═╣ ║ ║   ║   ╠═╣ ║   ╠═╣ ║╣ ";
+const LOGO_LINE_3: &str = "       ╩  ╩╚═ ╩ ╩ ╩ ╩═╝ ╚═╝ ╩ ╩ ╚═╝ ╩ ╩ ╚═╝";
+
+/// Returns the ASCII logo as styled Lines
+fn logo_lines() -> Vec<Line<'static>> {
+    vec![
+        Line::from(Span::styled(LOGO_LINE_1, styles::title_style())),
+        Line::from(Span::styled(LOGO_LINE_2, styles::title_style())),
+        Line::from(Span::styled(LOGO_LINE_3, styles::title_style())),
+    ]
+}
+
+/// Creates a standard overlay block with borders
+fn overlay_block() -> Block<'static> {
+    Block::default()
+        .borders(Borders::ALL)
+        .border_style(styles::border_style(true))
+        .style(Style::default())
+}
 
 pub fn render(frame: &mut Frame, app: &App) {
     let chunks = Layout::default()
@@ -39,10 +68,18 @@ pub fn render(frame: &mut Frame, app: &App) {
     if matches!(app.state, AppState::ConfirmingQuit) {
         render_quit_overlay(frame);
     }
+
+    if matches!(app.state, AppState::ConfirmingOffline) {
+        render_offline_overlay(frame);
+    }
+
+    if matches!(app.state, AppState::ConfirmingOnline) {
+        render_online_overlay(frame);
+    }
 }
 
 fn render_title_bar(frame: &mut Frame, _app: &App, area: Rect) {
-    let title = "  Scoutbook '88";
+    let title = "  Trailcache";
     let help_hint = "[?] Help";
     let title_len = title.len();
 
@@ -66,14 +103,12 @@ fn render_title_bar(frame: &mut Frame, _app: &App, area: Rect) {
 
 fn render_tabs(frame: &mut Frame, app: &App, area: Rect) {
     // Build main tabs text
-    let main_tabs = vec![
-        ("[1] Scouts", app.current_tab == Tab::Scouts),
+    let main_tabs = [("[1] Scouts", app.current_tab == Tab::Scouts),
         ("[2] Ranks", app.current_tab == Tab::Ranks),
         ("[3] Badges", app.current_tab == Tab::Badges),
         ("[4] Events", app.current_tab == Tab::Events),
         ("[5] Adults", app.current_tab == Tab::Adults),
-        ("[6] Unit", app.current_tab == Tab::Dashboard),
-    ];
+        ("[6] Unit", app.current_tab == Tab::Unit)];
 
     let mut spans = vec![Span::raw(" ")];
     for (i, (label, selected)) in main_tabs.iter().enumerate() {
@@ -137,7 +172,7 @@ fn render_main_content(frame: &mut Frame, app: &App, area: Rect) {
         Tab::Scouts => roster::render_scouts(frame, app, area),
         Tab::Adults => roster::render_adults(frame, app, area),
         Tab::Events => events::render(frame, app, area),
-        Tab::Dashboard => troop::render(frame, app, area),
+        Tab::Unit => unit::render(frame, app, area),
         Tab::Ranks => ranks::render(frame, app, area),
         Tab::Badges => badges::render(frame, app, area),
     }
@@ -145,12 +180,18 @@ fn render_main_content(frame: &mut Frame, app: &App, area: Rect) {
 
 fn render_status_bar(frame: &mut Frame, app: &App, area: Rect) {
     let last_updated = app.cache_ages.last_updated();
-    let shortcuts = "[u]pdate | [q]uit";
-
-    let left_text = if let Some(ref msg) = app.status_message {
-        format!(" {} ", msg)
+    let shortcuts = if app.offline_mode {
+        "[o]nline | [q]uit"
     } else {
-        format!(" Updated {} ", last_updated)
+        "[u]pdate | [o]ffline | [q]uit"
+    };
+
+    let (left_text, left_style) = if let Some(ref msg) = app.status_message {
+        (format!(" {} ", msg), styles::muted_style())
+    } else if app.offline_mode {
+        (" OFFLINE MODE ".to_string(), styles::error_style())
+    } else {
+        (format!(" Updated {} ", last_updated), styles::muted_style())
     };
 
     let right_text = format!(" {} ", shortcuts);
@@ -173,7 +214,7 @@ fn render_status_bar(frame: &mut Frame, app: &App, area: Rect) {
         // No center text - just left and right
         let padding_len = width.saturating_sub(left_text.len()).saturating_sub(right_text.len());
         let status_line = Line::from(vec![
-            Span::styled(left_text, styles::muted_style()),
+            Span::styled(left_text, left_style),
             Span::raw(" ".repeat(padding_len)),
             Span::styled(right_text, styles::muted_style()),
         ]);
@@ -187,7 +228,7 @@ fn render_status_bar(frame: &mut Frame, app: &App, area: Rect) {
         let right_pad = width.saturating_sub(right_start).saturating_sub(right_text.len());
 
         let status_line = Line::from(vec![
-            Span::styled(left_text, styles::muted_style()),
+            Span::styled(left_text, left_style),
             Span::raw(" ".repeat(left_pad)),
             Span::styled(center_text, styles::muted_style()),
             Span::raw(" ".repeat(right_pad)),
@@ -199,36 +240,21 @@ fn render_status_bar(frame: &mut Frame, app: &App, area: Rect) {
 }
 
 fn render_help_overlay(frame: &mut Frame, _app: &App) {
-    // Fixed size dialog matching login/quit overlays
-    let area = centered_rect_fixed(52, 27, frame.area());
-
-    // Clear the area
+    let area = centered_rect_fixed(OVERLAY_WIDTH, 27, frame.area());
     frame.render_widget(Clear, area);
 
     let version = env!("CARGO_PKG_VERSION");
 
-    let help_text = vec![
-        // ASCII Art Logo (centered for 52-width box, 50 interior)
+    let mut lines = logo_lines();
+    lines.extend(vec![
         Line::from(Span::styled(
-            "     ╔═╗╔═╗╔═╗╦ ╦╔╦╗╔╗ ╔═╗╔═╗╦╔═",
-            styles::title_style(),
-        )),
-        Line::from(Span::styled(
-            "     ╚═╗║  ║ ║║ ║ ║ ╠╩╗║ ║║ ║╠╩╗  '88",
-            styles::title_style(),
-        )),
-        Line::from(Span::styled(
-            "     ╚═╝╚═╝╚═╝╚═╝ ╩ ╚═╝╚═╝╚═╝╩ ╩",
-            styles::title_style(),
-        )),
-        Line::from(Span::styled(
-            format!("              version {}", version),
+            format!("                  version {}", version),
             styles::muted_style(),
         )),
         Line::from(""),
         Line::from(Span::styled(" Navigation", styles::highlight_style())),
         Line::from(vec![
-            Span::styled("  1-4       ", styles::help_key_style()),
+            Span::styled("  1-6       ", styles::help_key_style()),
             Span::styled("Switch tabs", styles::help_desc_style()),
         ]),
         Line::from(vec![
@@ -259,7 +285,11 @@ fn render_help_overlay(frame: &mut Frame, _app: &App) {
         ]),
         Line::from(vec![
             Span::styled("  u         ", styles::help_key_style()),
-            Span::styled("Update data from Scoutbook", styles::help_desc_style()),
+            Span::styled("Update data from API", styles::help_desc_style()),
+        ]),
+        Line::from(vec![
+            Span::styled("  o         ", styles::help_key_style()),
+            Span::styled("Toggle offline mode", styles::help_desc_style()),
         ]),
         Line::from(vec![
             Span::styled("  q         ", styles::help_key_style()),
@@ -277,50 +307,27 @@ fn render_help_overlay(frame: &mut Frame, _app: &App) {
         ]),
         Line::from(""),
         Line::from(vec![
-            Span::styled("       Press ", styles::muted_style()),
+            Span::styled("          Press ", styles::muted_style()),
             Span::styled("?", styles::help_key_style()),
             Span::styled(" or ", styles::muted_style()),
             Span::styled("Esc", styles::help_key_style()),
             Span::styled(" to close", styles::muted_style()),
         ]),
-    ];
+    ]);
 
-    let block = Block::default()
-        .borders(Borders::ALL)
-        .border_style(styles::border_style(true))
-        .style(Style::default());
-
-    let paragraph = Paragraph::new(help_text).block(block);
-
+    let paragraph = Paragraph::new(lines).block(overlay_block());
     frame.render_widget(paragraph, area);
 }
 
 fn render_login_overlay(frame: &mut Frame, app: &App) {
-    // Fixed size dialog - compact
     let height = if app.login_error.is_some() { 14 } else { 12 };
-    let area = centered_rect_fixed(46, height, frame.area());
-
-    // Clear the area
+    let area = centered_rect_fixed(OVERLAY_WIDTH, height, frame.area());
     frame.render_widget(Clear, area);
 
-    let mut lines = vec![];
-
-    // ASCII Art Logo (centered)
-    lines.push(Line::from(Span::styled(
-        "      ╔═╗╔═╗╔═╗╦ ╦╔╦╗╔╗ ╔═╗╔═╗╦╔═",
-        styles::title_style(),
-    )));
-    lines.push(Line::from(Span::styled(
-        "      ╚═╗║  ║ ║║ ║ ║ ╠╩╗║ ║║ ║╠╩╗  '88",
-        styles::title_style(),
-    )));
-    lines.push(Line::from(Span::styled(
-        "      ╚═╝╚═╝╚═╝╚═╝ ╩ ╚═╝╚═╝╚═╝╩ ╩",
-        styles::title_style(),
-    )));
+    let mut lines = logo_lines();
     lines.push(Line::from(""));
 
-    // Username field (centered: 46 width - 2 borders = 44 interior, field ~31 chars)
+    // Username field
     let username_focused = app.login_focus == LoginFocus::Username;
     let username_style = if username_focused {
         styles::selected_style()
@@ -330,13 +337,13 @@ fn render_login_overlay(frame: &mut Frame, app: &App) {
     let username_display = format!("{:<16}", app.login_username);
     let cursor = if username_focused { "▌" } else { "" };
     lines.push(Line::from(vec![
-        Span::raw("      "),
+        Span::raw("         "),
         Span::styled("Username: [", styles::muted_style()),
         Span::styled(format!("{}{}", username_display, cursor), username_style),
         Span::styled("]", styles::muted_style()),
     ]));
 
-    // Password field (centered)
+    // Password field
     let password_focused = app.login_focus == LoginFocus::Password;
     let password_style = if password_focused {
         styles::selected_style()
@@ -347,13 +354,13 @@ fn render_login_overlay(frame: &mut Frame, app: &App) {
     let password_display = format!("{:<16}", password_masked);
     let cursor = if password_focused { "▌" } else { "" };
     lines.push(Line::from(vec![
-        Span::raw("      "),
+        Span::raw("         "),
         Span::styled("Password: [", styles::muted_style()),
         Span::styled(format!("{}{}", password_display, cursor), password_style),
         Span::styled("]", styles::muted_style()),
     ]));
 
-    // Login button (centered)
+    // Login button
     let button_focused = app.login_focus == LoginFocus::Button;
     let button_style = if button_focused {
         styles::selected_style()
@@ -361,19 +368,12 @@ fn render_login_overlay(frame: &mut Frame, app: &App) {
         styles::list_item_style()
     };
     lines.push(Line::from(""));
-    if button_focused {
-        lines.push(Line::from(vec![
-            Span::raw("            ["),
-            Span::styled(" ▶ Login ◀ ", button_style),
-            Span::raw("]"),
-        ]));
-    } else {
-        lines.push(Line::from(vec![
-            Span::raw("            ["),
-            Span::styled("   Login   ", button_style),
-            Span::raw("]"),
-        ]));
-    }
+    let button_text = if button_focused { " ▶ Login ◀ " } else { "   Login   " };
+    lines.push(Line::from(vec![
+        Span::raw("                  ["),
+        Span::styled(button_text, button_style),
+        Span::raw("]"),
+    ]));
 
     // Error message
     if let Some(ref error) = app.login_error {
@@ -384,13 +384,7 @@ fn render_login_overlay(frame: &mut Frame, app: &App) {
         )));
     }
 
-    let block = Block::default()
-        .borders(Borders::ALL)
-        .border_style(styles::border_style(true))
-        .style(Style::default());
-
-    let paragraph = Paragraph::new(lines).block(block);
-
+    let paragraph = Paragraph::new(lines).block(overlay_block());
     frame.render_widget(paragraph, area);
 }
 
@@ -402,47 +396,92 @@ fn centered_rect_fixed(width: u16, height: u16, r: Rect) -> Rect {
 }
 
 fn render_quit_overlay(frame: &mut Frame) {
-    // Fixed size dialog matching login screen
-    let area = centered_rect_fixed(46, 10, frame.area());
-
-    // Clear the area
+    let area = centered_rect_fixed(OVERLAY_WIDTH, 10, frame.area());
     frame.render_widget(Clear, area);
 
-    let lines = vec![
-        Line::from(Span::styled(
-            "      ╔═╗╔═╗╔═╗╦ ╦╔╦╗╔╗ ╔═╗╔═╗╦╔═",
-            styles::title_style(),
-        )),
-        Line::from(Span::styled(
-            "      ╚═╗║  ║ ║║ ║ ║ ╠╩╗║ ║║ ║╠╩╗  '88",
-            styles::title_style(),
-        )),
-        Line::from(Span::styled(
-            "      ╚═╝╚═╝╚═╝╚═╝ ╩ ╚═╝╚═╝╚═╝╩ ╩",
-            styles::title_style(),
-        )),
+    let mut lines = logo_lines();
+    lines.extend(vec![
         Line::from(""),
         Line::from(Span::styled(
-            "   Are you sure you want to quit?",
+            "          Are you sure you want to quit?",
             styles::highlight_style(),
         )),
         Line::from(""),
         Line::from(vec![
-            Span::styled("   Press ", styles::muted_style()),
+            Span::styled("         Press ", styles::muted_style()),
             Span::styled("[Y]", styles::help_key_style()),
             Span::styled(" to quit, ", styles::muted_style()),
             Span::styled("[N]", styles::help_key_style()),
             Span::styled(" to cancel", styles::muted_style()),
         ]),
-    ];
+    ]);
 
-    let block = Block::default()
-        .borders(Borders::ALL)
-        .border_style(styles::border_style(true))
-        .style(Style::default());
+    let paragraph = Paragraph::new(lines).block(overlay_block());
+    frame.render_widget(paragraph, area);
+}
 
-    let paragraph = Paragraph::new(lines).block(block);
+fn render_offline_overlay(frame: &mut Frame) {
+    let area = centered_rect_fixed(OVERLAY_WIDTH, 14, frame.area());
+    frame.render_widget(Clear, area);
 
+    let mut lines = logo_lines();
+    lines.extend(vec![
+        Line::from(""),
+        Line::from(Span::styled(
+            "               Enter Offline Mode?",
+            styles::highlight_style(),
+        )),
+        Line::from(""),
+        Line::from(Span::styled(
+            "   All data will be cached for offline access.",
+            styles::muted_style(),
+        )),
+        Line::from(Span::styled(
+            "    Data will remain static until you go back",
+            styles::muted_style(),
+        )),
+        Line::from(Span::styled(
+            "          online by pressing [o] again.",
+            styles::muted_style(),
+        )),
+        Line::from(""),
+        Line::from(vec![
+            Span::styled("      Press ", styles::muted_style()),
+            Span::styled("[Y]", styles::help_key_style()),
+            Span::styled(" to go offline, ", styles::muted_style()),
+            Span::styled("[N]", styles::help_key_style()),
+            Span::styled(" to cancel", styles::muted_style()),
+        ]),
+    ]);
+
+    let paragraph = Paragraph::new(lines).block(overlay_block());
+    frame.render_widget(paragraph, area);
+}
+
+fn render_online_overlay(frame: &mut Frame) {
+    let area = centered_rect_fixed(OVERLAY_WIDTH, 12, frame.area());
+    frame.render_widget(Clear, area);
+
+    let mut lines = logo_lines();
+    lines.extend(vec![
+        Line::from(""),
+        Line::from(Span::styled(
+            "             You are in Offline Mode",
+            styles::highlight_style(),
+        )),
+        Line::from(""),
+        Line::from(vec![
+            Span::styled("     Press ", styles::muted_style()),
+            Span::styled("[o]", styles::help_key_style()),
+            Span::styled(" to go online or any other key", styles::muted_style()),
+        ]),
+        Line::from(Span::styled(
+            "                 to stay offline",
+            styles::muted_style(),
+        )),
+    ]);
+
+    let paragraph = Paragraph::new(lines).block(overlay_block());
     frame.render_widget(paragraph, area);
 }
 

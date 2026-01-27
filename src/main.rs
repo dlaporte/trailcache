@@ -1,7 +1,7 @@
-//! Scoutbook TUI - A terminal user interface for Scoutbook data.
+//! Trailcache - A blazing-fast TUI for Scout troop management.
 //!
 //! This application provides a fast, keyboard-driven interface for viewing
-//! and managing Boy Scouts of America troop data from Scoutbook.
+//! and managing Boy Scouts of America troop data. Works offline with cached data.
 
 mod app;
 mod auth;
@@ -69,7 +69,7 @@ async fn main() -> Result<()> {
 
     // Initialize logging
     init_tracing();
-    info!("Scoutbook TUI starting");
+    info!("Trailcache starting");
 
     // Setup terminal
     enable_raw_mode()?;
@@ -84,11 +84,16 @@ async fn main() -> Result<()> {
     // Load cached data first (for display behind login)
     let _ = app.load_from_cache().await;
 
-    // Check if we need to login
-    if !app.is_authenticated().await {
+    // Check startup mode
+    if app.should_prompt_offline_on_startup() {
+        // App was in offline mode - prompt user to go back online
+        // Don't try to login or refresh - we're offline
+        app.state = app::AppState::ConfirmingOnline;
+    } else if !app.is_authenticated().await {
+        // Need to login
         app.start_login();
     } else {
-        // Start background refresh if cache is stale
+        // Online and authenticated - refresh if cache is stale
         if app.is_cache_stale() {
             app.refresh_all_background().await;
         }
@@ -110,7 +115,7 @@ async fn main() -> Result<()> {
         eprintln!("Error: {}", e);
     }
 
-    info!("Scoutbook TUI shutting down");
+    info!("Trailcache shutting down");
     Ok(())
 }
 
@@ -194,10 +199,10 @@ async fn dump_requirements() -> Result<()> {
         .ok_or_else(|| anyhow::anyhow!("No saved session. Please run the app and login first."))?;
 
     let http_client = reqwest::Client::new();
-    let token = session_data.token.clone();
+    let token = std::sync::Arc::new(session_data.token.clone());
 
     // Fetch the catalog
-    let api_client = api::ApiClient::new()?.with_token(token.clone());
+    let api_client = api::ApiClient::new()?.with_token(std::sync::Arc::clone(&token));
     let catalog = api_client.fetch_merit_badge_catalog().await?;
     eprintln!("Found {} merit badges", catalog.len());
 

@@ -1337,29 +1337,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "94143f37725109f92c262ed2cf5e59bce7498c01bcc1502d7b9afe439a4e9f49"
 
 [[package]]
-name = "scoutbook88"
-version = "0.1.6"
-dependencies = [
- "anyhow",
- "chrono",
- "crossterm",
- "dirs",
- "dotenvy",
- "futures",
- "keyring",
- "ratatui",
- "reqwest",
- "rpassword",
- "serde",
- "serde_json",
- "thiserror 2.0.18",
- "tokio",
- "tracing",
- "tracing-appender",
- "tracing-subscriber",
-]
-
-[[package]]
 name = "security-framework"
 version = "2.11.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1881,6 +1858,29 @@ dependencies = [
  "tracing",
  "tracing-core",
  "tracing-log",
+]
+
+[[package]]
+name = "trailcache"
+version = "0.1.7"
+dependencies = [
+ "anyhow",
+ "chrono",
+ "crossterm",
+ "dirs",
+ "dotenvy",
+ "futures",
+ "keyring",
+ "ratatui",
+ "reqwest",
+ "rpassword",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+ "tokio",
+ "tracing",
+ "tracing-appender",
+ "tracing-subscriber",
 ]
 
 [[package]]

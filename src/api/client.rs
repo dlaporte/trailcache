@@ -3,6 +3,7 @@
 //! This module provides the `ApiClient` struct for making authenticated
 //! API requests to fetch scout, event, and advancement data.
 
+use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::{Context, Result};
@@ -76,11 +77,11 @@ struct RenewalRelationship {
 }
 
 /// API client for Scouting.org.
-/// Clone is cheap - reqwest::Client uses Arc internally for connection pooling.
+/// Clone is cheap - both reqwest::Client and token use Arc internally.
 #[derive(Clone)]
 pub struct ApiClient {
     client: Client,
-    token: Option<String>,
+    token: Option<Arc<String>>,
 }
 
 impl ApiClient {
@@ -96,21 +97,23 @@ impl ApiClient {
         })
     }
 
-    /// Set the bearer token for authenticated requests
-    pub fn set_token(&mut self, token: String) {
-        self.token = Some(token);
+    /// Set the bearer token for authenticated requests.
+    /// Accepts any type that can be converted to Arc<String> for efficient sharing.
+    pub fn set_token(&mut self, token: impl Into<Arc<String>>) {
+        self.token = Some(token.into());
     }
 
     /// Create a new ApiClient with the given token, sharing the connection pool.
-    /// This is more efficient than creating a new client for each request.
-    pub fn with_token(&self, token: String) -> Self {
+    /// This is very efficient - both the client and token are Arc-wrapped,
+    /// so cloning is just incrementing reference counts.
+    pub fn with_token(&self, token: Arc<String>) -> Self {
         Self {
             client: self.client.clone(), // Cheap clone, shares connection pool
-            token: Some(token),
+            token: Some(token),          // Cheap clone, just Arc pointer copy
         }
     }
 
-    /// Authenticate with Scoutbook and return session data
+    /// Authenticate with the API and return session data
     pub async fn authenticate(&self, username: &str, password: &str) -> Result<SessionData> {
         let url = format!("{}/users/{}/authenticate", AUTH_BASE_URL, username);
 
@@ -200,7 +203,7 @@ impl ApiClient {
         if let Some(ref token) = self.token {
             headers.insert(
                 header::AUTHORIZATION,
-                header::HeaderValue::from_str(&format!("Bearer {}", token))?,
+                header::HeaderValue::from_str(&format!("Bearer {}", token.as_str()))?,
             );
         }
         Ok(headers)

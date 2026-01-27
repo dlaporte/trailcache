@@ -12,9 +12,10 @@ use ratatui::{
     Frame,
 };
 
-use crate::app::{App, Focus};
+use crate::app::{App, Focus, ScoutRank};
 use crate::models::{RankProgress, Youth};
 use crate::ui::styles;
+use crate::utils::truncate;
 
 /// A scout working on a rank with their progress info
 #[derive(Clone)]
@@ -23,28 +24,9 @@ pub struct ScoutRankProgress<'a> {
     pub rank: Option<&'a RankProgress>,
 }
 
-/// Standard rank order for sorting
+/// Get the sort order for a rank name using ScoutRank enum.
 fn rank_order(rank_name: &str) -> usize {
-    let lower = rank_name.to_lowercase();
-    if lower == "crossover" {
-        0
-    } else if lower == "scout" {
-        1
-    } else if lower == "tenderfoot" {
-        2
-    } else if lower.contains("second class") {
-        3
-    } else if lower.contains("first class") {
-        4
-    } else if lower.contains("star") {
-        5
-    } else if lower.contains("life") {
-        6
-    } else if lower.contains("eagle") {
-        7
-    } else {
-        8
-    }
+    ScoutRank::from_str(Some(rank_name)).order()
 }
 
 /// Group youth by their current (highest completed) rank.
@@ -83,7 +65,7 @@ pub fn get_ranks_with_scouts<'a>(
         if let Some(rank) = current_rank {
             let entry = by_rank
                 .entry(rank.rank_name.clone())
-                .or_insert_with(Vec::new);
+                .or_default();
             entry.push(ScoutRankProgress { youth: y, rank: Some(rank) });
         } else {
             // No completed ranks - treat as crossover
@@ -181,13 +163,13 @@ pub fn render(frame: &mut Frame, app: &App, area: Rect) {
 }
 
 fn render_rank_list(frame: &mut Frame, app: &App, area: Rect) {
-    let rank_list = get_rank_list(&app.youth, &app.all_youth_ranks, app.ranks_tab_sort_by_count, app.ranks_tab_sort_ascending);
+    let rank_list = get_rank_list(&app.youth, &app.all_youth_ranks, app.ranks_sort_by_count, app.ranks_sort_ascending);
     let focused = matches!(app.focus, Focus::List);
 
     // Sort indicators for column headers
-    let arrow = if app.ranks_tab_sort_ascending { " ▲" } else { " ▼" };
-    let name_indicator = if !app.ranks_tab_sort_by_count { arrow } else { "" };
-    let count_indicator = if app.ranks_tab_sort_by_count { arrow } else { "" };
+    let arrow = if app.ranks_sort_ascending { " ▲" } else { " ▼" };
+    let name_indicator = if !app.ranks_sort_by_count { arrow } else { "" };
+    let count_indicator = if app.ranks_sort_by_count { arrow } else { "" };
 
     let header_cells = [
         Cell::from(format!("Name{}", name_indicator)),
@@ -205,7 +187,7 @@ fn render_rank_list(frame: &mut Frame, app: &App, area: Rect) {
         ])]
     } else {
         rank_list.iter().enumerate().map(|(i, (rank, count))| {
-            let style = if i == app.ranks_tab_selection {
+            let style = if i == app.ranks_selection {
                 styles::selected_style()
             } else {
                 styles::list_item_style()
@@ -238,18 +220,18 @@ fn render_rank_list(frame: &mut Frame, app: &App, area: Rect) {
         .row_highlight_style(styles::selected_style());
 
     let mut state = TableState::default();
-    state.select(Some(app.ranks_tab_selection));
+    state.select(Some(app.ranks_selection));
 
     frame.render_stateful_widget(table, area, &mut state);
 }
 
 fn render_scout_list(frame: &mut Frame, app: &App, area: Rect) {
     let grouped = get_ranks_with_scouts(&app.youth, &app.all_youth_ranks);
-    let rank_list = get_rank_list(&app.youth, &app.all_youth_ranks, app.ranks_tab_sort_by_count, app.ranks_tab_sort_ascending);
+    let rank_list = get_rank_list(&app.youth, &app.all_youth_ranks, app.ranks_sort_by_count, app.ranks_sort_ascending);
     let focused = matches!(app.focus, Focus::Detail);
 
     // Get selected rank name from sorted list, then find scouts
-    let selected_rank_name = rank_list.get(app.ranks_tab_selection)
+    let selected_rank_name = rank_list.get(app.ranks_selection)
         .map(|(name, _)| name.as_str())
         .unwrap_or("");
 
@@ -259,7 +241,7 @@ fn render_scout_list(frame: &mut Frame, app: &App, area: Rect) {
         .unwrap_or_default();
 
     // If viewing requirements, show that instead
-    if app.ranks_tab_viewing_requirements {
+    if app.ranks_viewing_requirements {
         render_requirements_view(frame, app, area, focused);
         return;
     }
@@ -280,7 +262,7 @@ fn render_scout_list(frame: &mut Frame, app: &App, area: Rect) {
         ])]
     } else {
         scouts.iter().enumerate().map(|(i, srp)| {
-            let style = if i == app.ranks_tab_scout_selection && focused {
+            let style = if i == app.ranks_scout_selection && focused {
                 styles::selected_style()
             } else {
                 styles::list_item_style()
@@ -335,7 +317,7 @@ fn render_scout_list(frame: &mut Frame, app: &App, area: Rect) {
 
     let mut state = TableState::default();
     if focused {
-        state.select(Some(app.ranks_tab_scout_selection));
+        state.select(Some(app.ranks_scout_selection));
     }
 
     frame.render_stateful_widget(table, area, &mut state);
@@ -343,10 +325,10 @@ fn render_scout_list(frame: &mut Frame, app: &App, area: Rect) {
 
 fn render_requirements_view(frame: &mut Frame, app: &App, area: Rect, focused: bool) {
     let grouped = get_ranks_with_scouts(&app.youth, &app.all_youth_ranks);
-    let rank_list = get_rank_list(&app.youth, &app.all_youth_ranks, app.ranks_tab_sort_by_count, app.ranks_tab_sort_ascending);
+    let rank_list = get_rank_list(&app.youth, &app.all_youth_ranks, app.ranks_sort_by_count, app.ranks_sort_ascending);
 
     // Get selected rank info from sorted list
-    let selected_rank_name = rank_list.get(app.ranks_tab_selection)
+    let selected_rank_name = rank_list.get(app.ranks_selection)
         .map(|(name, _)| name.as_str())
         .unwrap_or("");
 
@@ -355,7 +337,7 @@ fn render_requirements_view(frame: &mut Frame, app: &App, area: Rect, focused: b
         .map(|(_, scouts)| scouts.iter().collect())
         .unwrap_or_default();
 
-    let selected_scout = scouts.get(app.ranks_tab_scout_selection);
+    let selected_scout = scouts.get(app.ranks_scout_selection);
 
     let mut lines = vec![];
 
@@ -384,7 +366,7 @@ fn render_requirements_view(frame: &mut Frame, app: &App, area: Rect, focused: b
 
         // Show requirements
         for (i, req) in app.selected_rank_requirements.iter().enumerate() {
-            let is_selected = i == app.ranks_tab_requirement_selection;
+            let is_selected = i == app.ranks_requirement_selection;
             let check = if req.is_completed() { "✓" } else { "○" };
             let check_style = if req.is_completed() { styles::success_style() } else { styles::muted_style() };
 
@@ -429,12 +411,3 @@ fn render_requirements_view(frame: &mut Frame, app: &App, area: Rect, focused: b
     frame.render_widget(paragraph, area);
 }
 
-fn truncate(s: &str, max_len: usize) -> String {
-    // Replace tabs with spaces and trim to avoid display width issues
-    let cleaned: String = s.replace('\t', " ").trim().to_string();
-    if cleaned.len() <= max_len {
-        cleaned
-    } else {
-        format!("{}…", &cleaned[..max_len.saturating_sub(1)])
-    }
-}

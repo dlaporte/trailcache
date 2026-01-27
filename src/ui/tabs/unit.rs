@@ -7,7 +7,7 @@ use ratatui::{
 };
 use std::collections::HashMap;
 
-use crate::app::App;
+use crate::app::{App, ScoutRank};
 use crate::ui::styles;
 
 pub fn render(frame: &mut Frame, app: &App, area: Rect) {
@@ -60,7 +60,7 @@ fn render_patrols(frame: &mut Frame, app: &App, area: Rect) {
         if let Some((count, rank_counts)) = patrol_data.get(patrol_name) {
             // Patrol name with count
             lines.push(Line::from(vec![
-                Span::styled(format!("{}", patrol_name), styles::highlight_style()),
+                Span::styled(patrol_name.to_string(), styles::highlight_style()),
                 Span::styled(format!(" ({})", count), styles::muted_style()),
             ]));
 
@@ -107,7 +107,7 @@ fn render_rank_overview(frame: &mut Frame, app: &App, area: Rect) {
         let count = rank_counts.get(data_rank).copied().unwrap_or(0);
         if count > 0 {
             lines.push(Line::from(vec![
-                Span::styled(format!("{:<14}", rank), rank_color(*rank)),
+                Span::styled(format!("{:<14}", rank), styles::list_item_style()),
                 Span::raw(format!("{:>3}", count)),
             ]));
         }
@@ -491,24 +491,13 @@ fn get_patrol_rank_breakdown(app: &App) -> HashMap<String, (usize, HashMap<Strin
             continue;
         }
 
-        // Normalize rank names (API returns "Life Scout", "Star Scout", etc.)
-        let rank_raw = youth.current_rank.as_deref().unwrap_or("None");
-        let rank = if rank_raw.contains("Eagle") {
-            "Eagle"
-        } else if rank_raw.contains("Life") {
-            "Life"
-        } else if rank_raw.contains("Star") {
-            "Star"
-        } else if rank_raw == "First Class" {
-            "First Class"
-        } else if rank_raw == "Second Class" {
-            "Second Class"
-        } else if rank_raw == "Tenderfoot" {
-            "Tenderfoot"
-        } else if rank_raw == "Scout" {
-            "Scout"
-        } else {
+        // Use ScoutRank enum for consistent rank normalization
+        let scout_rank = ScoutRank::from_str(youth.current_rank.as_deref());
+        // Map "Crossover" back to "None" for data consistency with existing code
+        let rank = if scout_rank == ScoutRank::Unknown {
             "None"
+        } else {
+            scout_rank.display_name()
         };
 
         let entry = result.entry(patrol).or_insert_with(|| (0, HashMap::new()));
@@ -523,26 +512,18 @@ fn calculate_rank_distribution(app: &App) -> HashMap<&'static str, usize> {
     let mut counts: HashMap<&'static str, usize> = HashMap::new();
 
     for youth in &app.youth {
-        // Rank values can be "Eagle Scout", "Life Scout", "Star Scout", or just "Tenderfoot", "Scout", etc.
-        let rank = match youth.current_rank.as_deref() {
-            Some(r) if r.contains("Eagle") => "Eagle",
-            Some(r) if r.contains("Life") => "Life",
-            Some(r) if r.contains("Star") => "Star",
-            Some("First Class") => "First Class",
-            Some("Second Class") => "Second Class",
-            Some("Tenderfoot") => "Tenderfoot",
-            Some("Scout") => "Scout",
-            _ => "None",
+        // Use ScoutRank enum for consistent rank parsing
+        let scout_rank = ScoutRank::from_str(youth.current_rank.as_deref());
+        // Map "Crossover" back to "None" for data consistency
+        let rank = if scout_rank == ScoutRank::Unknown {
+            "None"
+        } else {
+            scout_rank.display_name()
         };
         *counts.entry(rank).or_insert(0) += 1;
     }
 
     counts
-}
-
-fn rank_color(_rank: &str) -> ratatui::style::Style {
-    // Use white for all ranks for consistency
-    styles::list_item_style()
 }
 
 struct TrainingStats {
@@ -713,11 +694,3 @@ fn calculate_renewal_stats(app: &App) -> RenewalStats {
     }
 }
 
-#[allow(dead_code)]
-fn truncate(s: &str, max_len: usize) -> String {
-    if s.len() <= max_len {
-        s.to_string()
-    } else {
-        format!("{}...", &s[..max_len.saturating_sub(3)])
-    }
-}

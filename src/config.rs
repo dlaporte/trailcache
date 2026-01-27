@@ -3,7 +3,7 @@
 //! This module handles loading and saving the application configuration,
 //! which includes the organization GUID, unit name, and last used username.
 //!
-//! Configuration is stored at `~/.config/scoutbook-tui/config.json`.
+//! Configuration is stored at `~/.config/trailcache/config.json`.
 
 use std::path::PathBuf;
 
@@ -11,7 +11,7 @@ use anyhow::Result;
 use serde::{Deserialize, Serialize};
 
 /// Application name used for config/cache directory paths
-const APP_NAME: &str = "scoutbook-tui";
+const APP_NAME: &str = "trailcache";
 
 /// Config file name
 const CONFIG_FILE: &str = "config.json";
@@ -21,6 +21,8 @@ pub struct Config {
     pub organization_guid: Option<String>,
     pub unit_name: Option<String>,
     pub last_username: Option<String>,
+    #[serde(default)]
+    pub offline_mode: bool,
 }
 
 impl Config {

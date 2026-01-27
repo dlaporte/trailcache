@@ -1,5 +1,40 @@
+use std::cmp::Ordering;
+
+// ============================================================================
+// String Comparison Utilities
+// ============================================================================
+
+/// Case-insensitive substring check without allocation.
+/// Assumes `needle` is already lowercase.
+pub fn contains_ignore_case(haystack: &str, needle_lowercase: &str) -> bool {
+    if needle_lowercase.is_empty() {
+        return true;
+    }
+    haystack
+        .char_indices()
+        .any(|(i, _)| {
+            haystack[i..]
+                .chars()
+                .zip(needle_lowercase.chars())
+                .all(|(h, n)| h.to_ascii_lowercase() == n)
+                && haystack[i..].chars().count() >= needle_lowercase.chars().count()
+        })
+}
+
+/// Case-insensitive string comparison for sorting (no allocation).
+pub fn cmp_ignore_case(a: &str, b: &str) -> Ordering {
+    a.chars()
+        .map(|c| c.to_ascii_lowercase())
+        .cmp(b.chars().map(|c| c.to_ascii_lowercase()))
+}
+
+// ============================================================================
+// Phone Number Formatting
+// ============================================================================
+
 /// Format a phone number for display
 /// Handles various input formats and normalizes to (XXX) XXX-XXXX
+#[allow(dead_code)] // Used in ui::tabs::patrols
 pub fn format_phone(phone: &str) -> String {
     // Extract just the digits
     let digits: String = phone.chars().filter(|c| c.is_ascii_digit()).collect();
@@ -21,24 +56,45 @@ pub fn format_phone(phone: &str) -> String {
     }
 }
 
-/// Truncate a string to a maximum length, adding ellipsis if needed
-pub fn truncate_string(s: &str, max_len: usize) -> String {
-    if s.len() <= max_len {
-        s.to_string()
-    } else if max_len <= 3 {
-        s.chars().take(max_len).collect()
+/// Strip HTML tags from a string.
+/// Useful for cleaning up requirement text from the API.
+pub fn strip_html(s: &str) -> String {
+    let mut result = String::new();
+    let mut in_tag = false;
+    for c in s.chars() {
+        match c {
+            '<' => in_tag = true,
+            '>' => in_tag = false,
+            _ if !in_tag => result.push(c),
+            _ => {}
+        }
+    }
+    // Normalize whitespace
+    result.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
+/// Truncate a string to a maximum length, adding ellipsis if needed.
+/// Handles tabs by replacing with spaces and trims whitespace.
+pub fn truncate(s: &str, max_len: usize) -> String {
+    // Replace tabs with spaces and trim to avoid display width issues
+    let cleaned: String = s.replace('\t', " ").trim().to_string();
+    if cleaned.len() <= max_len {
+        cleaned
+    } else if max_len <= 1 {
+        cleaned.chars().take(max_len).collect()
     } else {
-        let truncated: String = s.chars().take(max_len - 3).collect();
-        format!("{}...", truncated)
+        format!("{}…", &cleaned[..max_len.saturating_sub(1)])
     }
 }
 
 /// Format an optional string, returning a default if None
+#[allow(dead_code)]
 pub fn format_optional(value: &Option<String>, default: &str) -> String {
     value.as_deref().unwrap_or(default).to_string()
 }
 
 /// Format a date string to a more readable format
+#[allow(dead_code)]
 pub fn format_date(date: &str) -> String {
     // Try to parse ISO format and convert to readable
     if let Ok(dt) = chrono::DateTime::parse_from_rfc3339(date) {
@@ -65,9 +121,13 @@ mod tests {
     }
 
     #[test]
-    fn test_truncate_string() {
-        assert_eq!(truncate_string("Hello", 10), "Hello");
-        assert_eq!(truncate_string("Hello World", 8), "Hello...");
-        assert_eq!(truncate_string("Hi", 2), "Hi");
+    fn test_truncate() {
+        assert_eq!(truncate("Hello", 10), "Hello");
+        assert_eq!(truncate("Hello World", 8), "Hello W…");
+        assert_eq!(truncate("Hi", 2), "Hi");
+        // Test tab handling
+        assert_eq!(truncate("Hello\tWorld", 20), "Hello World");
+        // Test trimming
+        assert_eq!(truncate("  Hello  ", 10), "Hello");
     }
 }

@@ -715,7 +715,7 @@ fn summarize_requirement(s: &str) -> String {
     for bp in break_points {
         if let Some(pos) = clean.find(bp) {
             // Only use if it creates a reasonable summary (20-80 chars)
-            if pos >= 20 && pos <= 80 {
+            if (20..=80).contains(&pos) {
                 best_pos = Some(pos);
                 break;
             }
@@ -757,7 +757,7 @@ fn render_adult_table(frame: &mut Frame, app: &App, area: Rect) {
         .height(1);
 
     let rows: Vec<Row> = app.adults.iter().enumerate().map(|(i, adult)| {
-        let style = if i == app.patrol_selection {
+        let style = if i == app.adults_selection {
             styles::selected_style()
         } else {
             styles::list_item_style()
@@ -789,13 +789,13 @@ fn render_adult_table(frame: &mut Frame, app: &App, area: Rect) {
         .row_highlight_style(styles::selected_style());
 
     let mut state = TableState::default();
-    state.select(Some(app.patrol_selection));
+    state.select(Some(app.adults_selection));
 
     frame.render_stateful_widget(table, area, &mut state);
 }
 
 fn render_adult_detail(frame: &mut Frame, app: &App, area: Rect) {
-    let selected = app.adults.get(app.patrol_selection);
+    let selected = app.adults.get(app.adults_selection);
 
     let content = match selected {
         Some(adult) => {

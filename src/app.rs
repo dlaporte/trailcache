@@ -1,4 +1,4 @@
-//! Application state management for the Scoutbook TUI.
+//! Application state management for Trailcache.
 //!
 //! This module contains the core `App` struct that manages all application state,
 //! including UI state, cached data, session management, and background task coordination.
@@ -23,8 +23,7 @@ use crate::models::{
     Key3Leaders, MeritBadgeProgress, MeritBadgeRequirement, OrgProfile, Parent, Patrol,
     RankProgress, RankRequirement, ReadyToAward, ScoutSortColumn, UnitInfo, Youth,
 };
-
-pub use crate::models::PersonType;
+use crate::utils::{cmp_ignore_case, contains_ignore_case};
 
 // ============================================================================
 // Constants
@@ -55,34 +54,6 @@ const MAX_CONCURRENT_REQUESTS: usize = 10;
 const MAX_EVENT_GUESTS_CACHE_SIZE: usize = 50;
 
 // ============================================================================
-// String Helpers (avoid allocations in hot paths)
-// ============================================================================
-
-/// Case-insensitive substring check without allocation.
-/// Assumes `needle` is already lowercase.
-fn contains_ignore_case(haystack: &str, needle_lowercase: &str) -> bool {
-    if needle_lowercase.is_empty() {
-        return true;
-    }
-    haystack
-        .char_indices()
-        .any(|(i, _)| {
-            haystack[i..]
-                .chars()
-                .zip(needle_lowercase.chars())
-                .all(|(h, n)| h.to_ascii_lowercase() == n)
-                && haystack[i..].chars().count() >= needle_lowercase.chars().count()
-        })
-}
-
-/// Case-insensitive string comparison for sorting (no allocation).
-fn cmp_ignore_case(a: &str, b: &str) -> std::cmp::Ordering {
-    a.chars()
-        .map(|c| c.to_ascii_lowercase())
-        .cmp(b.chars().map(|c| c.to_ascii_lowercase()))
-}
-
-// ============================================================================
 // Rank Ordering
 // ============================================================================
 
@@ -100,7 +71,8 @@ pub enum ScoutRank {
 }
 
 impl ScoutRank {
-    /// Parse a rank string into a ScoutRank enum value
+    /// Parse a rank string into a ScoutRank enum value.
+    /// Handles variations like "Eagle Scout", "Life Scout", etc.
     pub fn from_str(s: Option<&str>) -> Self {
         match s {
             Some(rank) => {
@@ -127,11 +99,25 @@ impl ScoutRank {
         }
     }
 
-    /// Get the numeric order value for sorting
-    #[allow(dead_code)]
-    pub fn order(&self) -> i32 {
-        *self as i32
+    /// Get the numeric order for sorting (0 = Unknown/Crossover, 7 = Eagle).
+    pub fn order(&self) -> usize {
+        *self as usize
     }
+
+    /// Get the display name for this rank.
+    pub fn display_name(&self) -> &'static str {
+        match self {
+            ScoutRank::Unknown => "Crossover",
+            ScoutRank::Scout => "Scout",
+            ScoutRank::Tenderfoot => "Tenderfoot",
+            ScoutRank::SecondClass => "Second Class",
+            ScoutRank::FirstClass => "First Class",
+            ScoutRank::Star => "Star",
+            ScoutRank::Life => "Life",
+            ScoutRank::Eagle => "Eagle",
+        }
+    }
+
 }
 
 // ============================================================================
@@ -146,34 +132,11 @@ pub enum Tab {
     Badges,
     Events,
     Adults,
-    Dashboard,
+    Unit,
 }
 
-#[allow(dead_code)]
 impl Tab {
-    pub fn index(&self) -> usize {
-        match self {
-            Tab::Scouts => 0,
-            Tab::Ranks => 1,
-            Tab::Badges => 2,
-            Tab::Events => 3,
-            Tab::Adults => 4,
-            Tab::Dashboard => 5,
-        }
-    }
-
-    pub fn from_index(index: usize) -> Self {
-        match index {
-            0 => Tab::Scouts,
-            1 => Tab::Ranks,
-            2 => Tab::Badges,
-            3 => Tab::Events,
-            4 => Tab::Adults,
-            5 => Tab::Dashboard,
-            _ => Tab::Scouts,
-        }
-    }
-
+    /// Get the display title for this tab.
     pub fn title(&self) -> &'static str {
         match self {
             Tab::Scouts => "Scouts",
@@ -181,7 +144,7 @@ impl Tab {
             Tab::Badges => "Badges",
             Tab::Events => "Events",
             Tab::Adults => "Adults",
-            Tab::Dashboard => "Unit",
+            Tab::Unit => "Unit",
         }
     }
 
@@ -192,20 +155,20 @@ impl Tab {
             Tab::Ranks => Tab::Badges,
             Tab::Badges => Tab::Events,
             Tab::Events => Tab::Adults,
-            Tab::Adults => Tab::Dashboard,
-            Tab::Dashboard => Tab::Scouts,
+            Tab::Adults => Tab::Unit,
+            Tab::Unit => Tab::Scouts,
         }
     }
 
     /// Get the previous tab (wrapping around)
     pub fn prev(&self) -> Self {
         match self {
-            Tab::Scouts => Tab::Dashboard,
+            Tab::Scouts => Tab::Unit,
             Tab::Ranks => Tab::Scouts,
             Tab::Badges => Tab::Ranks,
             Tab::Events => Tab::Badges,
             Tab::Adults => Tab::Events,
-            Tab::Dashboard => Tab::Adults,
+            Tab::Unit => Tab::Adults,
         }
     }
 }
@@ -225,28 +188,6 @@ pub enum EventDetailView {
     Rsvp,
 }
 
-/// Filter for roster display
-#[allow(dead_code)]
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum RosterFilter {
-    All,
-    Youth,
-    Adults,
-    Parents,
-}
-
-#[allow(dead_code)]
-impl RosterFilter {
-    pub fn label(&self) -> &'static str {
-        match self {
-            RosterFilter::All => "All",
-            RosterFilter::Youth => "Youth",
-            RosterFilter::Adults => "Adults",
-            RosterFilter::Parents => "Parents",
-        }
-    }
-}
-
 /// Advancement tab sub-view
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AdvancementView {
@@ -254,13 +195,11 @@ pub enum AdvancementView {
     MeritBadges,
 }
 
-/// Current UI focus area
-#[allow(dead_code)]
+/// Current UI focus area (list panel or detail panel)
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Focus {
     List,
     Detail,
-    Search,
 }
 
 /// Overall application state
@@ -270,11 +209,9 @@ pub enum AppState {
     Searching,
     ShowingHelp,
     LoggingIn,
-    /// Reserved for showing a loading overlay during initial data fetch.
-    /// Currently unused - data loads in background with status bar indication.
-    #[allow(dead_code)]
-    Loading,
     ConfirmingQuit,
+    ConfirmingOffline,
+    ConfirmingOnline,
     Quitting,
 }
 
@@ -284,70 +221,6 @@ pub enum LoginFocus {
     Username,
     Password,
     Button,
-}
-
-// ============================================================================
-// Roster Entry (unified person view)
-// ============================================================================
-
-/// Represents a person in the roster (unified view)
-#[allow(dead_code)]
-#[derive(Debug, Clone)]
-pub struct RosterEntry {
-    pub user_id: Option<i64>,
-    pub first_name: String,
-    pub last_name: String,
-    pub person_type: PersonType,
-    pub phone: Option<String>,
-    pub email: Option<String>,
-    pub extra_info: Option<String>,
-}
-
-#[allow(dead_code)]
-impl RosterEntry {
-    pub fn display_name(&self) -> String {
-        format!("{}, {}", self.last_name, self.first_name)
-    }
-
-    pub fn full_name(&self) -> String {
-        format!("{} {}", self.first_name, self.last_name)
-    }
-
-    pub fn from_youth(youth: &Youth) -> Self {
-        Self {
-            user_id: youth.user_id,
-            first_name: youth.first_name.clone(),
-            last_name: youth.last_name.clone(),
-            person_type: PersonType::Youth,
-            phone: youth.phone_number.clone(),
-            email: youth.email.clone(),
-            extra_info: youth.patrol_name.clone(),
-        }
-    }
-
-    pub fn from_adult(adult: &Adult) -> Self {
-        Self {
-            user_id: adult.user_id,
-            first_name: adult.first_name.clone(),
-            last_name: adult.last_name.clone(),
-            person_type: PersonType::Adult,
-            phone: adult.phone_number.clone(),
-            email: adult.email.clone(),
-            extra_info: Some(adult.role()),
-        }
-    }
-
-    pub fn from_parent(parent: &Parent) -> Self {
-        Self {
-            user_id: parent.user_id,
-            first_name: parent.first_name.clone(),
-            last_name: parent.last_name.clone(),
-            person_type: PersonType::Parent,
-            phone: parent.phone(),
-            email: parent.email.clone(),
-            extra_info: parent.youth_name(),
-        }
-    }
 }
 
 // ============================================================================
@@ -383,10 +256,10 @@ enum RefreshResult {
     YouthRanks(i64, Vec<RankProgress>),
     /// Merit badge progress for a specific youth (user_id, badges)
     YouthMeritBadges(i64, Vec<MeritBadgeProgress>),
-    /// Requirements for a specific rank
-    RankRequirements(Vec<RankRequirement>),
-    /// Requirements for a specific merit badge (requirements, badge_name)
-    BadgeRequirements(Vec<MeritBadgeRequirement>, Option<String>),
+    /// Requirements for a specific rank (user_id, rank_id, requirements)
+    RankRequirements(i64, i64, Vec<RankRequirement>),
+    /// Requirements for a specific merit badge (user_id, badge_id, requirements, version)
+    BadgeRequirements(i64, i64, Vec<MeritBadgeRequirement>, Option<String>),
     /// Key 3 leadership positions (SM, CC, COR)
     Key3(Key3Leaders),
     /// Unit PIN information (charter, contact info)
@@ -419,7 +292,6 @@ pub struct App {
     pub current_tab: Tab,
     pub focus: Focus,
     pub search_query: String,
-    pub roster_filter: RosterFilter,
     pub advancement_view: AdvancementView,
     pub scout_sort_column: ScoutSortColumn,
     pub scout_sort_ascending: bool,
@@ -437,7 +309,7 @@ pub struct App {
 
     // Selection indices
     pub roster_selection: usize,
-    pub patrol_selection: usize,
+    pub adults_selection: usize,
     pub patrol_member_selection: usize,
     pub advancement_selection: usize,
     pub advancement_rank_selection: usize,
@@ -446,20 +318,20 @@ pub struct App {
     pub event_guest_selection: usize,
 
     // Ranks tab state
-    pub ranks_tab_selection: usize,
-    pub ranks_tab_scout_selection: usize,
-    pub ranks_tab_viewing_requirements: bool,
-    pub ranks_tab_requirement_selection: usize,
-    pub ranks_tab_sort_by_count: bool,
-    pub ranks_tab_sort_ascending: bool,
+    pub ranks_selection: usize,
+    pub ranks_scout_selection: usize,
+    pub ranks_viewing_requirements: bool,
+    pub ranks_requirement_selection: usize,
+    pub ranks_sort_by_count: bool,
+    pub ranks_sort_ascending: bool,
 
     // Badges tab state
-    pub badges_tab_selection: usize,
-    pub badges_tab_scout_selection: usize,
-    pub badges_tab_viewing_requirements: bool,
-    pub badges_tab_requirement_selection: usize,
-    pub badges_tab_sort_by_count: bool,
-    pub badges_tab_sort_ascending: bool,
+    pub badges_selection: usize,
+    pub badges_scout_selection: usize,
+    pub badges_viewing_requirements: bool,
+    pub badges_requirement_selection: usize,
+    pub badges_sort_by_count: bool,
+    pub badges_sort_ascending: bool,
 
     // Cached data
     pub youth: Vec<Youth>,
@@ -503,6 +375,12 @@ pub struct App {
 
     // Cache ages for status bar
     pub cache_ages: crate::cache::manager::CacheAges,
+
+    // Offline mode - when true, only use cached data
+    pub offline_mode: bool,
+
+    // Flag to trigger requirements fetch after main refresh completes
+    pending_offline_requirements_fetch: bool,
 }
 
 impl App {
@@ -551,6 +429,8 @@ impl App {
 
         let login_password = std::env::var("SCOUTBOOK_PASSWORD").unwrap_or_default();
 
+        let offline_mode = config.offline_mode;
+
         Ok(Self {
             config,
             session,
@@ -561,7 +441,6 @@ impl App {
             current_tab: Tab::Scouts,
             focus: Focus::List,
             search_query: String::new(),
-            roster_filter: RosterFilter::All,
             advancement_view: AdvancementView::Ranks,
             scout_sort_column: ScoutSortColumn::Name,
             scout_sort_ascending: true,
@@ -577,7 +456,7 @@ impl App {
             login_error: None,
 
             roster_selection: 0,
-            patrol_selection: 0,
+            adults_selection: 0,
             patrol_member_selection: 0,
             advancement_selection: 0,
             advancement_rank_selection: 0,
@@ -585,19 +464,19 @@ impl App {
             event_selection: 0,
             event_guest_selection: 0,
 
-            ranks_tab_selection: 0,
-            ranks_tab_scout_selection: 0,
-            ranks_tab_viewing_requirements: false,
-            ranks_tab_requirement_selection: 0,
-            ranks_tab_sort_by_count: false,
-            ranks_tab_sort_ascending: true,
+            ranks_selection: 0,
+            ranks_scout_selection: 0,
+            ranks_viewing_requirements: false,
+            ranks_requirement_selection: 0,
+            ranks_sort_by_count: false,
+            ranks_sort_ascending: true,
 
-            badges_tab_selection: 0,
-            badges_tab_scout_selection: 0,
-            badges_tab_viewing_requirements: false,
-            badges_tab_requirement_selection: 0,
-            badges_tab_sort_by_count: false,
-            badges_tab_sort_ascending: true,
+            badges_selection: 0,
+            badges_scout_selection: 0,
+            badges_viewing_requirements: false,
+            badges_requirement_selection: 0,
+            badges_sort_by_count: false,
+            badges_sort_ascending: true,
 
             youth: Vec::new(),
             adults: Vec::new(),
@@ -629,6 +508,8 @@ impl App {
 
             status_message: None,
             cache_ages: Default::default(),
+            offline_mode,
+            pending_offline_requirements_fetch: false,
         })
     }
 
@@ -644,7 +525,7 @@ impl App {
     /// Interactive login (used for CLI mode)
     #[allow(dead_code)]
     pub async fn login_interactive(&mut self) -> Result<()> {
-        println!("\n=== Scoutbook TUI Login ===\n");
+        println!("\n=== Trailcache Login ===\n");
 
         let username = if let Some(ref last_user) = self.config.last_username {
             if CredentialStore::has_credentials(last_user) {
@@ -762,7 +643,21 @@ impl App {
             }
             Err(e) => {
                 error!(error = %e, "Login failed");
-                self.login_error = Some(format!("Login failed: {}", e));
+                // Provide user-friendly error messages based on error type
+                let user_message = if e.to_string().contains("401")
+                    || e.to_string().to_lowercase().contains("unauthorized")
+                {
+                    "Invalid username or password".to_string()
+                } else if e.to_string().to_lowercase().contains("network")
+                    || e.to_string().to_lowercase().contains("connect")
+                {
+                    "Unable to connect to server. Check your internet connection.".to_string()
+                } else if e.to_string().to_lowercase().contains("timeout") {
+                    "Connection timed out. Please try again.".to_string()
+                } else {
+                    format!("Login failed: {}", e)
+                };
+                self.login_error = Some(user_message);
                 Err(e)
             }
         }
@@ -891,6 +786,67 @@ impl App {
         self.status_message = Some("Refreshing data...".to_string());
     }
 
+    /// Enter offline mode - cache all data and work from cache only.
+    pub async fn go_offline(&mut self) {
+        info!("Entering offline mode - caching all data");
+
+        // First, do a full refresh to ensure cache is current
+        let org_guid = match &self.config.organization_guid {
+            Some(guid) => Arc::new(guid.clone()),
+            None => {
+                warn!("No organization GUID configured");
+                self.status_message = Some("Error: No organization configured".to_string());
+                return;
+            }
+        };
+
+        let token = match self.session.token() {
+            Some(t) => Arc::new(t.to_string()),
+            None => {
+                warn!("No token available");
+                self.status_message = Some("Error: Not authenticated".to_string());
+                return;
+            }
+        };
+
+        let user_id = match self.session.user_id() {
+            Some(id) => id,
+            None => {
+                warn!("No user_id available");
+                self.status_message = Some("Error: Not authenticated".to_string());
+                return;
+            }
+        };
+
+        let tx = self.refresh_tx.clone();
+
+        tokio::spawn(async move {
+            Self::execute_background_refresh(tx, org_guid, token, user_id).await;
+        });
+
+        self.offline_mode = true;
+        self.config.offline_mode = true;
+        let _ = self.config.save();
+        self.pending_offline_requirements_fetch = true;
+        self.status_message = Some("Caching data for offline mode...".to_string());
+    }
+
+    /// Exit offline mode - resume normal online operation.
+    /// Forces reauthentication to ensure fresh credentials.
+    pub fn go_online(&mut self) {
+        info!("Exiting offline mode - forcing reauthentication");
+        self.offline_mode = false;
+        self.config.offline_mode = false;
+        let _ = self.config.save();
+        // Force reauthentication when coming back online
+        self.start_login();
+    }
+
+    /// Check if app should show offline mode prompt on startup
+    pub fn should_prompt_offline_on_startup(&self) -> bool {
+        self.offline_mode
+    }
+
     /// Helper to send refresh results, logging any channel errors
     async fn send_result(tx: &mpsc::Sender<RefreshResult>, result: RefreshResult) {
         if let Err(e) = tx.send(result).await {
@@ -934,17 +890,19 @@ impl App {
             }
         };
 
-        // Clone the base client for each parallel fetch (shares connection pool)
-        let api1 = base_api.with_token((*token).clone());
-        let api2 = base_api.with_token((*token).clone());
-        let api3 = base_api.with_token((*token).clone());
-        let api4 = base_api.with_token((*token).clone());
-        let api5 = base_api.with_token((*token).clone());
-        let api6 = base_api.with_token((*token).clone());
-        let api7 = base_api.with_token((*token).clone());
-        let api8 = base_api.with_token((*token).clone());
-        let api9 = base_api.with_token((*token).clone());
-        let api10 = base_api.with_token((*token).clone());
+        // Clone the base client for each parallel fetch.
+        // This is very efficient - both client and token use Arc internally,
+        // so cloning is just incrementing reference counts (no String allocation).
+        let api1 = base_api.with_token(Arc::clone(&token));
+        let api2 = base_api.with_token(Arc::clone(&token));
+        let api3 = base_api.with_token(Arc::clone(&token));
+        let api4 = base_api.with_token(Arc::clone(&token));
+        let api5 = base_api.with_token(Arc::clone(&token));
+        let api6 = base_api.with_token(Arc::clone(&token));
+        let api7 = base_api.with_token(Arc::clone(&token));
+        let api8 = base_api.with_token(Arc::clone(&token));
+        let api9 = base_api.with_token(Arc::clone(&token));
+        let api10 = base_api.with_token(Arc::clone(&token));
 
         // Clone org_guid for each task
         let org1 = Arc::clone(&org_guid);
@@ -991,7 +949,7 @@ impl App {
         Self::handle_events_refresh(&tx, events_res, &token).await;
 
         // Fetch commissioners separately using a clone of the base client
-        let api_commissioners = base_api.with_token((*token).clone());
+        let api_commissioners = base_api.with_token(Arc::clone(&token));
         match api_commissioners.fetch_commissioners(&org_guid).await {
             Ok(commissioners) => {
                 debug!(count = commissioners.len(), "Commissioners fetched");
@@ -1022,10 +980,10 @@ impl App {
 
         debug!(count = user_ids.len(), "Fetching ranks and badges for all youth");
 
-        // Create API client
+        // Create API client with Arc-wrapped token (cheap clone)
         let api = match ApiClient::new() {
             Ok(mut api) => {
-                api.set_token((**token).clone());
+                api.set_token(Arc::clone(token));
                 api
             }
             Err(e) => {
@@ -1061,6 +1019,98 @@ impl App {
         }
 
         debug!("All youth advancement fetching complete");
+    }
+
+    /// Fetch all requirements for offline mode.
+    /// This fetches rank and badge requirements for all youth's active ranks and badges.
+    async fn fetch_all_requirements_for_offline(
+        tx: &mpsc::Sender<RefreshResult>,
+        all_youth_ranks: &HashMap<i64, Vec<RankProgress>>,
+        all_youth_badges: &HashMap<i64, Vec<MeritBadgeProgress>>,
+        token: &Arc<String>,
+    ) {
+        info!("Fetching all requirements for offline mode");
+
+        // Create API client with Arc-wrapped token (cheap clone)
+        let api = match ApiClient::new() {
+            Ok(mut api) => {
+                api.set_token(Arc::clone(token));
+                api
+            }
+            Err(e) => {
+                error!(error = %e, "Failed to create API client for requirements fetch");
+                return;
+            }
+        };
+
+        // Collect all rank requirements to fetch (user_id, rank_id)
+        // Fetch ALL ranks for complete offline access
+        let mut rank_reqs_to_fetch: Vec<(i64, i64)> = Vec::new();
+        for (&user_id, ranks) in all_youth_ranks.iter() {
+            for rank in ranks {
+                rank_reqs_to_fetch.push((user_id, rank.rank_id));
+            }
+        }
+
+        // Collect all badge requirements to fetch (user_id, badge_id)
+        // Fetch ALL badges for complete offline access
+        let mut badge_reqs_to_fetch: Vec<(i64, i64)> = Vec::new();
+        for (&user_id, badges) in all_youth_badges.iter() {
+            for badge in badges {
+                badge_reqs_to_fetch.push((user_id, badge.id));
+            }
+        }
+
+        info!(
+            rank_count = rank_reqs_to_fetch.len(),
+            badge_count = badge_reqs_to_fetch.len(),
+            "Fetching requirements for offline"
+        );
+
+        // Fetch rank requirements with limited concurrency
+        const MAX_CONCURRENT: usize = 5;
+        for chunk in rank_reqs_to_fetch.chunks(MAX_CONCURRENT) {
+            let futures: Vec<_> = chunk
+                .iter()
+                .map(|&(user_id, rank_id)| {
+                    let api = api.clone();
+                    async move {
+                        let reqs = api.fetch_rank_requirements(user_id, rank_id).await.ok();
+                        (user_id, rank_id, reqs)
+                    }
+                })
+                .collect();
+
+            let results = futures::future::join_all(futures).await;
+            for (user_id, rank_id, reqs) in results {
+                if let Some(reqs) = reqs {
+                    Self::send_result(tx, RefreshResult::RankRequirements(user_id, rank_id, reqs)).await;
+                }
+            }
+        }
+
+        // Fetch badge requirements with limited concurrency
+        for chunk in badge_reqs_to_fetch.chunks(MAX_CONCURRENT) {
+            let futures: Vec<_> = chunk
+                .iter()
+                .map(|&(user_id, badge_id)| {
+                    let api = api.clone();
+                    async move {
+                        let result = api.fetch_badge_requirements(user_id, badge_id).await.ok();
+                        (user_id, badge_id, result)
+                    }
+                })
+                .collect();
+
+            let results = futures::future::join_all(futures).await;
+            for (user_id, badge_id, result) in results {
+                if let Some((reqs, version)) = result {
+                    Self::send_result(tx, RefreshResult::BadgeRequirements(user_id, badge_id, reqs, version)).await;
+                }
+            }
+        }
+
+        info!("All requirements fetching complete");
     }
 
     /// Helper to send a successful fetch result or an error
@@ -1177,7 +1227,7 @@ impl App {
     async fn handle_events_refresh(
         tx: &mpsc::Sender<RefreshResult>,
         events_res: Result<Vec<Event>>,
-        token: &str,
+        token: &Arc<String>,
     ) {
         match events_res {
             Ok(data) => {
@@ -1186,17 +1236,17 @@ impl App {
                 // Extract IDs before sending to avoid cloning the entire events list
                 let event_ids: Vec<i64> = data.iter().map(|e| e.id).collect();
 
-                Self::send_result(&tx, RefreshResult::Events(data)).await;
+                Self::send_result(tx, RefreshResult::Events(data)).await;
 
                 // Fetch detailed info for each event with limited concurrency
                 debug!("Fetching event details with max {} concurrent requests...", MAX_CONCURRENT_REQUESTS);
 
                 let tx_clone = tx.clone();
-                let token_owned = token.to_string();
+                let token = Arc::clone(token);
 
                 stream::iter(event_ids)
                     .map(|id| {
-                        let token = token_owned.clone();
+                        let token = Arc::clone(&token);
                         async move {
                             match ApiClient::new() {
                                 Ok(mut api) => {
@@ -1223,7 +1273,7 @@ impl App {
             }
             Err(e) => {
                 error!(error = %e, "Events fetch failed");
-                Self::send_result(&tx, RefreshResult::Events(vec![])).await;
+                Self::send_result(tx, RefreshResult::Events(vec![])).await;
             }
         }
     }
@@ -1249,7 +1299,10 @@ impl App {
         }
     }
 
-    /// Process a single refresh result
+    /// Process a single refresh result from the background task.
+    ///
+    /// Updates the corresponding app state and caches the data. This is called
+    /// by `check_background_tasks` for each result received from the channel.
     fn process_refresh_result(&mut self, result: RefreshResult) {
         match result {
             RefreshResult::Youth(data) => {
@@ -1369,29 +1422,74 @@ impl App {
                 self.all_youth_badges.insert(user_id, data.clone());
                 self.selected_youth_badges = data;
             }
-            RefreshResult::RankRequirements(data) => {
+            RefreshResult::RankRequirements(user_id, rank_id, data) => {
+                // Cache the requirements
+                if let Err(e) = self.cache.save_rank_requirements(user_id, rank_id, &data) {
+                    warn!(error = %e, "Failed to cache rank requirements");
+                }
                 self.selected_rank_requirements = data;
                 self.viewing_requirements = true;
                 self.requirement_selection = 0;
             }
-            RefreshResult::BadgeRequirements(data, version) => {
+            RefreshResult::BadgeRequirements(user_id, badge_id, data, version) => {
+                // Cache the requirements
+                if let Err(e) = self.cache.save_badge_requirements(user_id, badge_id, &data, &version) {
+                    warn!(error = %e, "Failed to cache badge requirements");
+                }
                 self.selected_badge_requirements = data;
                 self.selected_badge_version = version;
                 self.viewing_requirements = true;
                 self.requirement_selection = 0;
             }
             RefreshResult::RefreshComplete => {
-                // Only clear status if it's a progress message, preserve errors
-                if let Some(ref msg) = self.status_message {
-                    if !msg.starts_with("Error:") {
-                        self.status_message = None;
+                // Check if we need to fetch all requirements for offline mode
+                if self.pending_offline_requirements_fetch {
+                    self.pending_offline_requirements_fetch = false;
+                    self.status_message = Some("Caching requirements for offline...".to_string());
+
+                    // Clone data needed for the async task
+                    let tx = self.refresh_tx.clone();
+                    let all_youth_ranks = self.all_youth_ranks.clone();
+                    let all_youth_badges = self.all_youth_badges.clone();
+                    let token = match self.session.token() {
+                        Some(t) => Arc::new(t.to_string()),
+                        None => {
+                            self.status_message = Some("Offline mode ready (no requirements cached)".to_string());
+                            return;
+                        }
+                    };
+
+                    tokio::spawn(async move {
+                        Self::fetch_all_requirements_for_offline(&tx, &all_youth_ranks, &all_youth_badges, &token).await;
+                        Self::send_result(&tx, RefreshResult::RefreshComplete).await;
+                    });
+                } else {
+                    // Only clear status if it's a progress message, preserve errors
+                    if let Some(ref msg) = self.status_message {
+                        if !msg.starts_with("Error:") {
+                            self.status_message = None;
+                        }
                     }
                 }
             }
             RefreshResult::Error(msg) => {
                 // Show error and log it
                 error!(error = %msg, "Background task error");
-                self.status_message = Some(format!("Error: {}", msg));
+                // Simplify common error messages for the user
+                let user_message = if msg.to_lowercase().contains("rate limit") {
+                    "Server is busy. Please wait a moment and try again.".to_string()
+                } else if msg.to_lowercase().contains("unauthorized")
+                    || msg.to_lowercase().contains("401")
+                {
+                    "Session expired. Please log in again.".to_string()
+                } else if msg.to_lowercase().contains("network")
+                    || msg.to_lowercase().contains("connect")
+                {
+                    "Network error. Check your connection.".to_string()
+                } else {
+                    format!("Error: {}", msg)
+                };
+                self.status_message = Some(user_message);
             }
         }
     }
@@ -1457,14 +1555,12 @@ impl App {
                         }).collect();
 
                         let results = futures::future::join_all(detail_futures).await;
-                        for result in results {
-                            if let Ok(detail) = result {
-                                Self::send_result(&tx, RefreshResult::EventDetail(detail)).await;
-                            }
+                        for detail in results.into_iter().flatten() {
+                            Self::send_result(&tx, RefreshResult::EventDetail(detail)).await;
                         }
                     }
                 }
-                Tab::Dashboard => {
+                Tab::Unit => {
                     if let Ok(data) = api.fetch_youth(&org_guid).await {
                         Self::send_result(&tx, RefreshResult::Youth(data)).await;
                     }
@@ -1577,12 +1673,24 @@ impl App {
             return;
         }
 
+        // In offline mode, use cached data only
+        if self.offline_mode {
+            if let Ok(Some(cached)) = self.cache.load_rank_requirements(user_id, rank_id) {
+                self.selected_rank_requirements = cached.data;
+                self.viewing_requirements = true;
+                self.requirement_selection = 0;
+            }
+            return;
+        }
+
         let token = match self.session.token() {
             Some(t) => t.to_string(),
             None => return,
         };
 
         let tx = self.refresh_tx.clone();
+        let uid = user_id;
+        let rid = rank_id;
 
         tokio::spawn(async move {
             let api = match ApiClient::new() {
@@ -1596,8 +1704,8 @@ impl App {
                 }
             };
 
-            if let Ok(data) = api.fetch_rank_requirements(user_id, rank_id).await {
-                Self::send_result(&tx, RefreshResult::RankRequirements(data)).await;
+            if let Ok(data) = api.fetch_rank_requirements(uid, rid).await {
+                Self::send_result(&tx, RefreshResult::RankRequirements(uid, rid, data)).await;
             }
         });
     }
@@ -1609,12 +1717,26 @@ impl App {
             return;
         }
 
+        // In offline mode, use cached data only
+        if self.offline_mode {
+            if let Ok(Some(cached)) = self.cache.load_badge_requirements(user_id, badge_id) {
+                let (reqs, version) = cached.data;
+                self.selected_badge_requirements = reqs;
+                self.selected_badge_version = version;
+                self.viewing_requirements = true;
+                self.requirement_selection = 0;
+            }
+            return;
+        }
+
         let token = match self.session.token() {
             Some(t) => t.to_string(),
             None => return,
         };
 
         let tx = self.refresh_tx.clone();
+        let uid = user_id;
+        let bid = badge_id;
 
         tokio::spawn(async move {
             let api = match ApiClient::new() {
@@ -1628,8 +1750,8 @@ impl App {
                 }
             };
 
-            if let Ok((reqs, version)) = api.fetch_badge_requirements(user_id, badge_id).await {
-                Self::send_result(&tx, RefreshResult::BadgeRequirements(reqs, version)).await;
+            if let Ok((reqs, version)) = api.fetch_badge_requirements(uid, bid).await {
+                Self::send_result(&tx, RefreshResult::BadgeRequirements(uid, bid, reqs, version)).await;
             }
         });
     }
@@ -1637,55 +1759,6 @@ impl App {
     // =========================================================================
     // Data Access Methods
     // =========================================================================
-
-    /// Get filtered roster based on current filter and search query
-    #[allow(dead_code)]
-    pub fn get_filtered_roster(&self) -> Vec<RosterEntry> {
-        let mut entries = Vec::new();
-
-        if matches!(self.roster_filter, RosterFilter::All | RosterFilter::Youth) {
-            for youth in &self.youth {
-                entries.push(RosterEntry::from_youth(youth));
-            }
-        }
-
-        if matches!(self.roster_filter, RosterFilter::All | RosterFilter::Adults) {
-            for adult in &self.adults {
-                entries.push(RosterEntry::from_adult(adult));
-            }
-        }
-
-        if matches!(self.roster_filter, RosterFilter::All | RosterFilter::Parents) {
-            for parent in &self.parents {
-                entries.push(RosterEntry::from_parent(parent));
-            }
-        }
-
-        // Apply search filter (searches name, email, and role/position/patrol)
-        if !self.search_query.is_empty() {
-            let query = self.search_query.to_lowercase();
-            entries.retain(|e| {
-                contains_ignore_case(&e.first_name, &query)
-                    || contains_ignore_case(&e.last_name, &query)
-                    || e.email
-                        .as_ref()
-                        .map(|s| contains_ignore_case(s, &query))
-                        .unwrap_or(false)
-                    || e.extra_info
-                        .as_ref()
-                        .map(|s| contains_ignore_case(s, &query))
-                        .unwrap_or(false)
-            });
-        }
-
-        // Sort by last name, then first name (case-insensitive)
-        entries.sort_by(|a, b| {
-            cmp_ignore_case(&a.last_name, &b.last_name)
-                .then_with(|| cmp_ignore_case(&a.first_name, &b.first_name))
-        });
-
-        entries
-    }
 
     /// Get patrol members for a specific patrol
     #[allow(dead_code)]
@@ -1704,30 +1777,33 @@ impl App {
             .collect()
     }
 
+    /// Check if a youth matches the search query.
+    /// Query should already be lowercased.
+    fn youth_matches_search(youth: &Youth, query: &str) -> bool {
+        contains_ignore_case(&youth.first_name, query)
+            || contains_ignore_case(&youth.last_name, query)
+            || youth.patrol_name
+                .as_ref()
+                .map(|s| contains_ignore_case(s, query))
+                .unwrap_or(false)
+            || youth.current_rank
+                .as_ref()
+                .map(|s| contains_ignore_case(s, query))
+                .unwrap_or(false)
+            || youth.email()
+                .as_ref()
+                .map(|s| contains_ignore_case(s, query))
+                .unwrap_or(false)
+    }
+
     /// Get youth sorted by current sort settings, filtered by search query
     pub fn get_sorted_youth(&self) -> Vec<&Youth> {
         let mut sorted: Vec<&Youth> = self.youth.iter().collect();
 
         // Apply search filter (searches name, patrol, rank, email)
-        // Query is lowercased once; field comparisons use no-allocation helper
         if !self.search_query.is_empty() {
             let query = self.search_query.to_lowercase();
-            sorted.retain(|y| {
-                contains_ignore_case(&y.first_name, &query)
-                    || contains_ignore_case(&y.last_name, &query)
-                    || y.patrol_name
-                        .as_ref()
-                        .map(|s| contains_ignore_case(s, &query))
-                        .unwrap_or(false)
-                    || y.current_rank
-                        .as_ref()
-                        .map(|s| contains_ignore_case(s, &query))
-                        .unwrap_or(false)
-                    || y.email()
-                        .as_ref()
-                        .map(|s| contains_ignore_case(s, &query))
-                        .unwrap_or(false)
-            });
+            sorted.retain(|y| Self::youth_matches_search(y, &query));
         }
 
         sorted.sort_by(|a, b| {
@@ -1770,21 +1846,10 @@ impl App {
     pub fn get_youth_by_rank(&self) -> Vec<&Youth> {
         let mut sorted: Vec<&Youth> = self.youth.iter().collect();
 
-        // Apply search filter (same as get_sorted_youth)
+        // Apply search filter
         if !self.search_query.is_empty() {
             let query = self.search_query.to_lowercase();
-            sorted.retain(|y| {
-                contains_ignore_case(&y.first_name, &query)
-                    || contains_ignore_case(&y.last_name, &query)
-                    || y.patrol_name
-                        .as_ref()
-                        .map(|s| contains_ignore_case(s, &query))
-                        .unwrap_or(false)
-                    || y.current_rank
-                        .as_ref()
-                        .map(|s| contains_ignore_case(s, &query))
-                        .unwrap_or(false)
-            });
+            sorted.retain(|y| Self::youth_matches_search(y, &query));
         }
 
         sorted.sort_by(|a, b| {
@@ -1812,7 +1877,7 @@ impl App {
                         .as_ref()
                         .map(|s| contains_ignore_case(s, &query))
                         .unwrap_or(false)
-                    || contains_ignore_case(&e.derived_type(), &query)
+                    || contains_ignore_case(e.derived_type(), &query)
             });
         }
 
@@ -1834,7 +1899,7 @@ impl App {
                     .then_with(|| name_cmp(a, b))
                 }
                 EventSortColumn::Type => {
-                    cmp_ignore_case(&a.derived_type(), &b.derived_type())
+                    cmp_ignore_case(a.derived_type(), b.derived_type())
                         .then_with(|| name_cmp(a, b))
                 }
             };
@@ -1855,7 +1920,7 @@ impl App {
         self.config
             .unit_name
             .clone()
-            .unwrap_or_else(|| "Scoutbook".to_string())
+            .unwrap_or_else(|| "Trailcache".to_string())
     }
 
     /// Deduplicate adults by person_guid, combining multiple positions.
@@ -1903,6 +1968,82 @@ impl App {
         let mut result: Vec<Adult> = by_guid.into_values().collect();
         result.sort_by(|a, b| a.last_name.cmp(&b.last_name).then(a.first_name.cmp(&b.first_name)));
         result
+    }
+
+    // =========================================================================
+    // Sort Toggle Helpers
+    // =========================================================================
+
+    /// Toggle scout sort column - if already sorting by this column, flip direction;
+    /// otherwise switch to this column with ascending=true. Resets selection to 0.
+    pub fn toggle_scout_sort(&mut self, column: ScoutSortColumn) {
+        if self.scout_sort_column == column {
+            self.scout_sort_ascending = !self.scout_sort_ascending;
+        } else {
+            self.scout_sort_column = column;
+            self.scout_sort_ascending = true;
+        }
+        self.roster_selection = 0;
+    }
+
+    /// Toggle event sort column - if already sorting by this column, flip direction;
+    /// otherwise switch to this column with ascending=true. Resets selection to 0.
+    pub fn toggle_event_sort(&mut self, column: EventSortColumn) {
+        if self.event_sort_column == column {
+            self.event_sort_ascending = !self.event_sort_ascending;
+        } else {
+            self.event_sort_column = column;
+            self.event_sort_ascending = true;
+        }
+        self.event_selection = 0;
+    }
+
+    /// Toggle ranks tab sort to sort by name. Resets selections.
+    pub fn toggle_ranks_sort_by_name(&mut self) {
+        if !self.ranks_sort_by_count {
+            self.ranks_sort_ascending = !self.ranks_sort_ascending;
+        } else {
+            self.ranks_sort_by_count = false;
+            self.ranks_sort_ascending = true;
+        }
+        self.ranks_selection = 0;
+        self.ranks_scout_selection = 0;
+    }
+
+    /// Toggle ranks tab sort to sort by count. Resets selections.
+    pub fn toggle_ranks_sort_by_count(&mut self) {
+        if self.ranks_sort_by_count {
+            self.ranks_sort_ascending = !self.ranks_sort_ascending;
+        } else {
+            self.ranks_sort_by_count = true;
+            self.ranks_sort_ascending = false; // Default descending for count
+        }
+        self.ranks_selection = 0;
+        self.ranks_scout_selection = 0;
+    }
+
+    /// Toggle badges tab sort to sort by name. Resets selections.
+    pub fn toggle_badges_sort_by_name(&mut self) {
+        if !self.badges_sort_by_count {
+            self.badges_sort_ascending = !self.badges_sort_ascending;
+        } else {
+            self.badges_sort_by_count = false;
+            self.badges_sort_ascending = true;
+        }
+        self.badges_selection = 0;
+        self.badges_scout_selection = 0;
+    }
+
+    /// Toggle badges tab sort to sort by count. Resets selections.
+    pub fn toggle_badges_sort_by_count(&mut self) {
+        if self.badges_sort_by_count {
+            self.badges_sort_ascending = !self.badges_sort_ascending;
+        } else {
+            self.badges_sort_by_count = true;
+            self.badges_sort_ascending = false; // Default descending for count
+        }
+        self.badges_selection = 0;
+        self.badges_scout_selection = 0;
     }
 }
 
@@ -1990,18 +2131,22 @@ mod tests {
 
     #[test]
     fn test_tab_next() {
-        assert_eq!(Tab::Scouts.next(), Tab::Adults);
-        assert_eq!(Tab::Adults.next(), Tab::Events);
-        assert_eq!(Tab::Events.next(), Tab::Dashboard);
-        assert_eq!(Tab::Dashboard.next(), Tab::Scouts); // Wraps around
+        assert_eq!(Tab::Scouts.next(), Tab::Ranks);
+        assert_eq!(Tab::Ranks.next(), Tab::Badges);
+        assert_eq!(Tab::Badges.next(), Tab::Events);
+        assert_eq!(Tab::Events.next(), Tab::Adults);
+        assert_eq!(Tab::Adults.next(), Tab::Unit);
+        assert_eq!(Tab::Unit.next(), Tab::Scouts); // Wraps around
     }
 
     #[test]
     fn test_tab_prev() {
-        assert_eq!(Tab::Scouts.prev(), Tab::Dashboard); // Wraps around
-        assert_eq!(Tab::Adults.prev(), Tab::Scouts);
-        assert_eq!(Tab::Events.prev(), Tab::Adults);
-        assert_eq!(Tab::Dashboard.prev(), Tab::Events);
+        assert_eq!(Tab::Scouts.prev(), Tab::Unit); // Wraps around
+        assert_eq!(Tab::Unit.prev(), Tab::Adults);
+        assert_eq!(Tab::Adults.prev(), Tab::Events);
+        assert_eq!(Tab::Events.prev(), Tab::Badges);
+        assert_eq!(Tab::Badges.prev(), Tab::Ranks);
+        assert_eq!(Tab::Ranks.prev(), Tab::Scouts);
     }
 
     // -------------------------------------------------------------------------
