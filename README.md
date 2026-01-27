@@ -33,17 +33,23 @@ Trailcache loads your data in under a second. Keyboard-driven navigation means y
 ## FEATURES
 
 ```
-[F1] SCOUTS     Your complete youth roster. Names, ranks, patrols,
+[1] SCOUTS      Your complete youth roster. Names, ranks, patrols,
                 advancement status. Sorted any way you want it.
 
-[F2] ADULTS     Leaders, committee members, parents. All the grown-ups
-                who make it happen.
+[2] RANKS       Track rank advancement across the troop. See who's
+                close to their next rank and what they still need.
 
-[F3] EVENTS     Campouts, meetings, service projects. See who's RSVP'd.
+[3] BADGES      Merit badge progress at a glance. Who's working on
+                what, and how far along they are.
+
+[4] EVENTS      Campouts, meetings, service projects. See who's RSVP'd.
                 Plan your next adventure.
 
-[F4] UNIT       The big picture. Rank advancement stats. Awards ready
-                to present. Everything at a glance.
+[5] ADULTS      Leaders, committee members, parents. All the grown-ups
+                who make it happen.
+
+[6] UNIT        The big picture. Troop stats, awards ready to present,
+                everything at a glance.
 ```
 
 ## ON THE TRAIL
@@ -87,12 +93,13 @@ cargo build --release
 ```
   NAVIGATION                    ACTIONS
   ──────────────────────────    ──────────────────────────
-  Tab / Shift+Tab  Switch tabs  /         Search
-  j / Down         Move down    Esc       Cancel / Back
-  k / Up           Move up      Enter     Select / Confirm
-  h / Left         Previous     r         Refresh data
-  l / Right        Next         ?         Help
-  PgUp / PgDn      Fast scroll  q         Quit
+  1-6              Jump to tab  /         Search
+  Tab / Shift+Tab  Next/prev    Esc       Cancel / Back
+  j / Down         Move down    Enter     Select / Confirm
+  k / Up           Move up      r         Refresh data
+  h / Left         Previous     ?         Help
+  l / Right        Next         q         Quit
+  PgUp / PgDn      Fast scroll
 ```
 
 ---
