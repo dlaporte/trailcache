@@ -1,18 +1,32 @@
 ```
- ____                  _   _                 _      ___   ___
-/ ___|  ___ ___  _   _| |_| |__   ___   ___ | | __ ( _ ) ( _ )
-\___ \ / __/ _ \| | | | __| '_ \ / _ \ / _ \| |/ / / _ \ / _ \
- ___) | (_| (_) | |_| | |_| |_) | (_) | (_) |   < | (_) | (_) |
-|____/ \___\___/ \__,_|\__|_.__/ \___/ \___/|_|\_\ \___/ \___/
+ _____         _ _  ____           _
+|_   _| __ __ _(_) |/ ___|__ _  ___| |__   ___
+  | || '__/ _` | | | |   / _` |/ __| '_ \ / _ \
+  | || | | (_| | | | |__| (_| | (__| | | |  __/
+  |_||_|  \__,_|_|_|\____\__,_|\___|_| |_|\___|
 
-        <<<  TERMINAL INTERFACE FOR SCOUTBOOK DATA  >>>
+       <<<  YOUR SCOUTBOOK DATA, TRAIL-READY  >>>
 ```
 
 ---
 
-**YOU'RE A SCOUTMASTER. YOU DON'T HAVE TIME TO WAIT.**
+**BECAUSE CELL SERVICE DOESN'T REACH THE CAMPSITE.**
 
-Between campouts, merit badge classes, and trying to remember which scout needs their Totin' Chip signed off, the *last* thing you need is a slow web interface. Scoutbook88 is a **blazing-fast terminal application** that puts your troop data at your fingertips in milliseconds, not minutes.
+You're deep in the backcountry. A scout asks if they've completed all their Second Class requirements. Another needs to know which merit badges they're registered for. The sun is setting, the campfire is calling, and your phone shows exactly zero bars.
+
+Trailcache keeps your troop's Scoutbook data cached locally, ready whenever you need it—whether you're in a basement meeting room or on a mountaintop.
+
+---
+
+## WHY TRAILCACHE?
+
+### Take Your Data Into the Field
+
+Your troop data goes where you go. Cache it before the campout, access it anywhere. No signal? No problem. Check advancement status by lantern light.
+
+### Blazing Fast
+
+Trailcache loads your data in under a second. Keyboard-driven navigation means you get answers as fast as you can type. Your terminal is ready before you finish sitting down.
 
 ---
 
@@ -28,25 +42,20 @@ Between campouts, merit badge classes, and trying to remember which scout needs 
 [F3] EVENTS     Campouts, meetings, service projects. See who's RSVP'd.
                 Plan your next adventure.
 
-[F4] DASHBOARD  The big picture. Rank advancement stats. Awards ready
+[F4] UNIT       The big picture. Rank advancement stats. Awards ready
                 to present. Everything at a glance.
 ```
 
-## SPEED IS THE NAME OF THE GAME
+## ON THE TRAIL
 
-- **Instant startup** - cached data loads while you blink
-- **Background refresh** - data updates happen behind the scenes
-- **Keyboard-driven** - your hands never leave home row
-- **Zero bloat** - no browser, no JavaScript, no waiting
+Picture this: You're at summer camp. It's merit badge midway. Scouts are asking what they're signed up for, parents are texting questions you can't answer without data, and the camp WiFi is... well, it's camp WiFi.
 
-```
-  ╔══════════════════════════════════════════════════════════════╗
-  ║  LOAD TIME COMPARISON                                        ║
-  ╠══════════════════════════════════════════════════════════════╣
-  ║  Scoutbook Website    ████████████████████████████  12+ sec  ║
-  ║  Scoutbook88          █                              <1 sec  ║
-  ╚══════════════════════════════════════════════════════════════╝
-```
+**With Trailcache:**
+- Synced your data before leaving home
+- Pull up any scout's info instantly
+- Answer questions, be the hero, get back to the s'mores
+
+---
 
 ## INSTALLATION
 
@@ -54,22 +63,24 @@ Between campouts, merit badge classes, and trying to remember which scout needs 
 
 **macOS / Linux:**
 ```bash
-curl --proto '=https' --tlsv1.2 -LsSf https://github.com/dlaporte/scoutbook88/releases/latest/download/scoutbook88-installer.sh | sh
+curl --proto '=https' --tlsv1.2 -LsSf https://github.com/dlaporte/trailcache/releases/latest/download/trailcache-installer.sh | sh
 ```
 
 **Windows (PowerShell):**
 ```powershell
-irm https://github.com/dlaporte/scoutbook88/releases/latest/download/scoutbook88-installer.ps1 | iex
+irm https://github.com/dlaporte/trailcache/releases/latest/download/trailcache-installer.ps1 | iex
 ```
 
 ### From Source
 
 ```bash
-git clone https://github.com/dlaporte/scoutbook88.git
-cd scoutbook88
+git clone https://github.com/dlaporte/trailcache.git
+cd trailcache
 cargo build --release
-./target/release/scoutbook88
+./target/release/trailcache
 ```
+
+---
 
 ## KEYBOARD CONTROLS
 
@@ -84,42 +95,13 @@ cargo build --release
   PgUp / PgDn      Fast scroll  q         Quit
 ```
 
+---
+
 ## REQUIREMENTS
 
 - Your Scouting.org credentials (same login as Scoutbook)
 - A terminal that supports Unicode (most do)
-- The burning desire to stop waiting for web pages to load
-
-## FOR THE BUSY SCOUTMASTER
-
-You've got 15 minutes before the troop meeting. A parent asks which scouts are close to Star rank. Another wants to know if their kid RSVP'd for the campout. The Advancement Chair needs to know what awards to order.
-
-**With Scoutbook88:**
-1. Open terminal
-2. Get answers in seconds
-3. Look like a hero
-
-**With the website:**
-1. Open browser
-2. Wait for login page
-3. Log in
-4. Wait for dashboard
-5. Click through menus
-6. Wait for each page
-7. Meeting has started
-
----
-
-```
-  ╭────────────────────────────────────────────────────────────╮
-  │                                                            │
-  │    "I used to dread checking Scoutbook before meetings.    │
-  │     Now I just pop open the terminal and I'm done."        │
-  │                                                            │
-  │                              - Every Scoutmaster, probably │
-  │                                                            │
-  ╰────────────────────────────────────────────────────────────╯
-```
+- An internet connection (just once, to sync your data)
 
 ---
 
@@ -131,7 +113,9 @@ Built with Rust for maximum performance:
 - **reqwest** - HTTP client
 - **keyring** - Secure credential storage (OS keychain)
 
-Data is cached locally and refreshed in the background, so you always see something instantly while fresh data loads.
+Data is cached locally and refreshed in the background when connected, so you always have something to work with—online or off.
+
+---
 
 ## LICENSE
 
@@ -140,9 +124,9 @@ MIT
 ---
 
 ```
-        ╔═══════════════════════════════════════════╗
-        ║                                           ║
-        ║   BE PREPARED... TO BE FAST.              ║
-        ║                                           ║
-        ╚═══════════════════════════════════════════╝
+      ╔═══════════════════════════════════════════════════╗
+      ║                                                   ║
+      ║   BE PREPARED... EVEN WITHOUT A SIGNAL.           ║
+      ║                                                   ║
+      ╚═══════════════════════════════════════════════════╝
 ```
