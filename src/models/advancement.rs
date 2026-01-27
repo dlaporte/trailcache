@@ -144,7 +144,7 @@ pub struct RankWithRequirements {
 
 // Wrapper for merit badge with requirements response
 // Note: API returns id as string
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MeritBadgeWithRequirements {
     #[serde(default, deserialize_with = "deserialize_string_or_number")]
     pub id: Option<String>,
@@ -153,6 +153,24 @@ pub struct MeritBadgeWithRequirements {
     pub version: Option<String>,
     #[serde(default)]
     pub requirements: Vec<MeritBadgeRequirement>,
+}
+
+/// Merit badge from the catalog endpoint (/advancements/meritBadges)
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MeritBadgeCatalogEntry {
+    #[serde(deserialize_with = "deserialize_string_or_number")]
+    pub id: Option<String>,
+    pub name: String,
+    #[serde(rename = "isEagleRequired")]
+    pub is_eagle_required: Option<bool>,
+    pub category: Option<String>,
+    #[serde(rename = "categoryId")]
+    pub category_id: Option<String>,
+    #[serde(rename = "bsaNumber")]
+    pub bsa_number: Option<String>,
+    #[serde(rename = "shortName")]
+    pub short_name: Option<String>,
+    pub version: Option<String>,
 }
 
 // Merit badge requirement from API

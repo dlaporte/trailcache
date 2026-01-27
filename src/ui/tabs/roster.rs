@@ -692,8 +692,14 @@ fn strip_html(s: &str) -> String {
     result.split_whitespace().collect::<Vec<_>>().join(" ")
 }
 
-/// Summarize a requirement - take first clause or truncate early
+/// Summarize a requirement - use AI summary if available, otherwise truncate
 fn summarize_requirement(s: &str) -> String {
+    // First, try to get an AI-generated summary
+    if let Some(summary) = crate::summaries::get_summary(s) {
+        return summary.to_string();
+    }
+
+    // Fall back to basic summarization
     let clean = strip_html(s);
 
     // If already short, return as-is

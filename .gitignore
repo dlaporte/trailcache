@@ -17,3 +17,6 @@ Thumbs.db
 # Environment
 .env
 .env.local
+raw_requirements.json
+filtered_requirements.json
+data/summaries_checkpoint.json
