@@ -447,13 +447,18 @@ fn render_rank_requirements_view(frame: &mut Frame, app: &App, selected: Option<
         lines.push(Line::from(""));
 
         // Show requirements
+        // Calculate available width for requirement text (area width minus borders and prefix)
+        let text_width = (area.width as usize).saturating_sub(12); // 2 border + 2 prefix + 1 check + 1 space + 5 req_num + 1 padding
+
         for (i, req) in app.selected_rank_requirements.iter().enumerate() {
             let is_selected = i == app.requirement_selection;
             let check = if req.is_completed() { "✓" } else { "○" };
             let check_style = if req.is_completed() { styles::success_style() } else { styles::muted_style() };
 
             let req_num = req.number();
-            let req_text = truncate(&req.text(), 50);
+            let req_text = truncate(&req.text(), text_width.min(50));
+            // Pad to full width to clear any artifacts from previous renders
+            let req_text_padded = format!("{:<width$}", req_text, width = text_width);
 
             // Highlight selected requirement
             let prefix = if is_selected { "▶ " } else { "  " };
@@ -464,7 +469,7 @@ fn render_rank_requirements_view(frame: &mut Frame, app: &App, selected: Option<
                 Span::styled(check, check_style),
                 Span::raw(" "),
                 Span::styled(format!("{:<5}", req_num), styles::highlight_style()),
-                Span::styled(req_text, text_style),
+                Span::styled(req_text_padded, text_style),
             ]));
 
             // Show completion date if completed and selected
@@ -474,7 +479,7 @@ fn render_rank_requirements_view(frame: &mut Frame, app: &App, selected: Option<
                         lines.push(Line::from(vec![
                             Span::raw("          "),
                             Span::styled("Completed: ", styles::muted_style()),
-                            Span::styled(date.chars().take(10).collect::<String>(), styles::highlight_style()),
+                            Span::styled(format!("{:<width$}", date.chars().take(10).collect::<String>(), width = text_width.saturating_sub(10)), styles::highlight_style()),
                         ]));
                     }
                 }
@@ -621,6 +626,9 @@ fn render_badge_requirements_view(frame: &mut Frame, app: &App, selected: Option
         lines.push(Line::from(""));
 
         // Show requirements
+        // Calculate available width for requirement text (area width minus borders and prefix)
+        let text_width = (area.width as usize).saturating_sub(12); // 2 border + 2 prefix + 1 check + 1 space + 5 req_num + 1 padding
+
         for (i, req) in app.selected_badge_requirements.iter().enumerate() {
             let is_selected = i == app.requirement_selection;
             let check = if req.is_completed() { "✓" } else { "○" };
@@ -630,7 +638,9 @@ fn render_badge_requirements_view(frame: &mut Frame, app: &App, selected: Option
             // Summarize to first sentence and truncate
             let raw_text = req.text();
             let summary = summarize_requirement(&raw_text);
-            let req_text = truncate(&summary, 45);
+            let req_text = truncate(&summary, text_width.min(45));
+            // Pad to full width to clear any artifacts from previous renders
+            let req_text_padded = format!("{:<width$}", req_text, width = text_width);
 
             let prefix = if is_selected { "▶ " } else { "  " };
             let text_style = if is_selected { styles::selected_style() } else { styles::list_item_style() };
@@ -640,7 +650,7 @@ fn render_badge_requirements_view(frame: &mut Frame, app: &App, selected: Option
                 Span::styled(check, check_style),
                 Span::raw(" "),
                 Span::styled(format!("{:<5}", req_num), styles::highlight_style()),
-                Span::styled(req_text, text_style),
+                Span::styled(req_text_padded, text_style),
             ]));
 
             // Show completion date if completed and selected
@@ -650,7 +660,7 @@ fn render_badge_requirements_view(frame: &mut Frame, app: &App, selected: Option
                         lines.push(Line::from(vec![
                             Span::raw("          "),
                             Span::styled("Completed: ", styles::muted_style()),
-                            Span::styled(date.chars().take(10).collect::<String>(), styles::highlight_style()),
+                            Span::styled(format!("{:<width$}", date.chars().take(10).collect::<String>(), width = text_width.saturating_sub(10)), styles::highlight_style()),
                         ]));
                     }
                 }
