@@ -941,9 +941,11 @@ fn render_adult_detail(frame: &mut Frame, app: &App, area: Rect) {
 }
 
 fn truncate(s: &str, max_len: usize) -> String {
-    if s.len() <= max_len {
-        s.to_string()
+    // Replace tabs with spaces and trim to avoid display width issues
+    let cleaned: String = s.replace('\t', " ").trim().to_string();
+    if cleaned.len() <= max_len {
+        cleaned
     } else {
-        format!("{}…", &s[..max_len.saturating_sub(1)])
+        format!("{}…", &cleaned[..max_len.saturating_sub(1)])
     }
 }
