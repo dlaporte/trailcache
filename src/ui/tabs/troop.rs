@@ -421,6 +421,16 @@ fn render_unit_right(frame: &mut Frame, app: &App, area: Rect) {
             }
         }
 
+        // Registration URL
+        if let Some(ref reg_url) = unit_info.registration_url {
+            if !reg_url.is_empty() {
+                lines.push(Line::from(vec![
+                    Span::styled("Registration:    ", styles::muted_style()),
+                    Span::raw(reg_url.as_str()),
+                ]));
+            }
+        }
+
         lines.push(Line::from(""));
 
         // Meeting location

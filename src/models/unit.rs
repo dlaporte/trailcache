@@ -31,6 +31,7 @@ impl Leader {
 pub struct UnitInfo {
     pub name: Option<String>,
     pub website: Option<String>,
+    pub registration_url: Option<String>,
     pub district_name: Option<String>,
     pub council_name: Option<String>,
     pub charter_org_name: Option<String>,

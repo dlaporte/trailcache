@@ -815,6 +815,7 @@ impl ApiClient {
         Ok(UnitInfo {
             name: unit.name.clone(),
             website: pin.unit_website.clone(),
+            registration_url: unit.tiny_url.clone(),
             district_name: unit.district_name.clone(),
             council_name: council.name.clone(),
             charter_org_name: unit.charter_information.community_organization_name.clone(),
@@ -977,6 +978,8 @@ struct UnitInformationApi {
     name: Option<String>,
     #[serde(rename = "districtName")]
     district_name: Option<String>,
+    #[serde(rename = "tinyUrl")]
+    tiny_url: Option<String>,
     #[serde(rename = "charterInformation")]
     charter_information: CharterInformation,
 }
