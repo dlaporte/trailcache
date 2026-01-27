@@ -236,7 +236,7 @@ fn render_help_overlay(frame: &mut Frame, _app: &App) {
             Span::styled("Switch focus (list ↔ detail)", styles::help_desc_style()),
         ]),
         Line::from(vec![
-            Span::styled("  ↑/↓       ", styles::help_key_style()),
+            Span::styled("  ↑/↓ j/k   ", styles::help_key_style()),
             Span::styled("Navigate list", styles::help_desc_style()),
         ]),
         Line::from(vec![
