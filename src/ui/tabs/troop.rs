@@ -384,13 +384,13 @@ fn render_unit_right(frame: &mut Frame, app: &App, area: Rect) {
         // Contact person
         if let Some(contact) = unit_info.contacts.first() {
             lines.push(Line::from(vec![
-                Span::styled("Contact:         ", styles::muted_style()),
+                Span::styled("Contact:      ", styles::muted_style()),
                 Span::raw(contact.full_name()),
             ]));
             if let Some(ref email) = contact.email {
                 if !email.is_empty() {
                     lines.push(Line::from(vec![
-                        Span::styled("  Email:         ", styles::muted_style()),
+                        Span::styled("Email:        ", styles::muted_style()),
                         Span::raw(email.as_str()),
                     ]));
                 }
@@ -398,7 +398,7 @@ fn render_unit_right(frame: &mut Frame, app: &App, area: Rect) {
             if let Some(ref phone) = contact.phone {
                 if !phone.is_empty() {
                     lines.push(Line::from(vec![
-                        Span::styled("  Phone:         ", styles::muted_style()),
+                        Span::styled("Phone:        ", styles::muted_style()),
                         Span::raw(phone.as_str()),
                     ]));
                 }
@@ -415,7 +415,7 @@ fn render_unit_right(frame: &mut Frame, app: &App, area: Rect) {
                     .strip_prefix("http://")
                     .unwrap_or(website);
                 lines.push(Line::from(vec![
-                    Span::styled("Website:         ", styles::muted_style()),
+                    Span::styled("Website:      ", styles::muted_style()),
                     Span::raw(clean_url),
                 ]));
             }
@@ -425,7 +425,7 @@ fn render_unit_right(frame: &mut Frame, app: &App, area: Rect) {
         if let Some(ref reg_url) = unit_info.registration_url {
             if !reg_url.is_empty() {
                 lines.push(Line::from(vec![
-                    Span::styled("Registration:    ", styles::muted_style()),
+                    Span::styled("Registration: ", styles::muted_style()),
                     Span::raw(reg_url.as_str()),
                 ]));
             }
