@@ -612,58 +612,6 @@ impl ApiClient {
         Err(anyhow::anyhow!("Failed to parse merit badge catalog. Response starts with: {}", &text[..text.len().min(200)]))
     }
 
-    /// Fetch requirements for a merit badge from the catalog (not youth-specific)
-    pub async fn fetch_catalog_badge_requirements(&self, badge_id: &str) -> Result<MeritBadgeWithRequirements> {
-        let url = format!("{}/advancements/meritBadges/{}/requirements", API_BASE_URL, badge_id);
-
-        let response = self
-            .client
-            .get(&url)
-            .headers(self.auth_headers()?)
-            .send()
-            .await?;
-
-        let response = Self::check_response(response).await?;
-        let text = response.text().await?;
-
-        // Try parsing directly as MeritBadgeWithRequirements
-        if let Ok(badge) = serde_json::from_str::<MeritBadgeWithRequirements>(&text) {
-            return Ok(badge);
-        }
-
-        // Try parsing as array of requirements (wrap it ourselves)
-        if let Ok(reqs) = serde_json::from_str::<Vec<MeritBadgeRequirement>>(&text) {
-            return Ok(MeritBadgeWithRequirements {
-                id: Some(badge_id.to_string()),
-                name: String::new(),
-                version: None,
-                requirements: reqs,
-            });
-        }
-
-        // Try as wrapped object
-        #[derive(Deserialize)]
-        struct Wrapper {
-            #[serde(default)]
-            name: Option<String>,
-            #[serde(default)]
-            version: Option<String>,
-            #[serde(default, alias = "requirements", alias = "data")]
-            requirements: Vec<MeritBadgeRequirement>,
-        }
-
-        if let Ok(wrapper) = serde_json::from_str::<Wrapper>(&text) {
-            return Ok(MeritBadgeWithRequirements {
-                id: Some(badge_id.to_string()),
-                name: wrapper.name.unwrap_or_default(),
-                version: wrapper.version,
-                requirements: wrapper.requirements,
-            });
-        }
-
-        Err(anyhow::anyhow!("Failed to parse requirements. Response starts with: {}", &text[..text.len().min(300)]))
-    }
-
     /// Fetch events for a date range around the current date
     pub async fn fetch_events(&self, user_id: i64) -> Result<Vec<Event>> {
         let url = format!("{}/advancements/events", API_BASE_URL);

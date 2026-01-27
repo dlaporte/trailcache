@@ -20,8 +20,6 @@ struct SummaryFile {
     generated: String,
     #[serde(default)]
     summaries: HashMap<String, String>,
-    #[serde(default)]
-    flags: HashMap<String, String>,
 }
 
 #[derive(Debug, Default)]
@@ -38,24 +36,7 @@ pub fn init() {
 }
 
 fn load_summaries() -> Option<SummaryData> {
-    // Try to load from embedded data first (compile-time include)
-    #[cfg(feature = "embedded-summaries")]
-    {
-        let data = include_str!("../data/requirement_summaries.json");
-        if let Ok(file) = serde_json::from_str::<SummaryFile>(data) {
-            debug!(
-                version = %file.version,
-                generated = %file.generated,
-                count = file.summaries.len(),
-                "Loaded embedded summaries"
-            );
-            return Some(SummaryData {
-                summaries: file.summaries,
-            });
-        }
-    }
-
-    // Fall back to loading from disk at runtime
+    // Try to load from disk at runtime
     let paths = [
         "data/requirement_summaries.json",
         "./data/requirement_summaries.json",
@@ -90,30 +71,4 @@ pub fn get_summary(original_text: &str) -> Option<&'static str> {
         .get()
         .and_then(|data| data.summaries.get(original_text))
         .map(|s| s.as_str())
-}
-
-/// Get a summary for a requirement text, falling back to the original if no summary exists.
-/// Truncates the fallback to max_len if needed.
-pub fn get_summary_or_truncate(original_text: &str, max_len: usize) -> String {
-    if let Some(summary) = get_summary(original_text) {
-        return summary.to_string();
-    }
-
-    // Fallback: truncate original text
-    if original_text.len() <= max_len {
-        original_text.to_string()
-    } else {
-        let truncated: String = original_text.chars().take(max_len - 1).collect();
-        format!("{}…", truncated)
-    }
-}
-
-/// Check if summaries are loaded
-pub fn is_loaded() -> bool {
-    SUMMARIES.get().map(|d| !d.summaries.is_empty()).unwrap_or(false)
-}
-
-/// Get the number of loaded summaries
-pub fn count() -> usize {
-    SUMMARIES.get().map(|d| d.summaries.len()).unwrap_or(0)
 }

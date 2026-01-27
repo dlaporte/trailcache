@@ -293,8 +293,6 @@ async fn dump_requirements() -> Result<()> {
                     // Simple requirement struct that matches the API response
                     #[derive(Deserialize, Debug)]
                     struct ApiRequirement {
-                        #[serde(default)]
-                        id: Option<String>,
                         #[serde(default, alias = "listNumber", alias = "number")]
                         list_number: Option<String>,
                         #[serde(default)]
