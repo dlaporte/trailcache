@@ -18,7 +18,7 @@ use std::time::Duration;
 
 use anyhow::Result;
 use crossterm::{
-    event::{self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode, KeyModifiers},
+    event::{self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode, KeyEventKind, KeyModifiers},
     execute,
     terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
 };
@@ -380,6 +380,11 @@ async fn run_app(
         // Poll for events with timeout to allow background updates
         if event::poll(Duration::from_millis(EVENT_POLL_TIMEOUT_MS))? {
             if let Event::Key(key) = event::read()? {
+                // Only handle key press events (Windows reports press AND release)
+                if key.kind != KeyEventKind::Press {
+                    continue;
+                }
+
                 // Ctrl+C to quit
                 if key.code == KeyCode::Char('c') && key.modifiers.contains(KeyModifiers::CONTROL) {
                     return Ok(());
