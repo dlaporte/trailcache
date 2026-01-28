@@ -28,6 +28,10 @@ Your troop data goes where you go. Cache it before the campout, access it anywhe
 
 Trailcache loads your data in under a second. Keyboard-driven navigation means you get answers as fast as you can type. Your terminal is ready before you finish sitting down.
 
+### Cross-Platform
+
+Runs natively on macOS, Windows, and Linux. Same experience everywhere.
+
 ---
 
 ## FEATURES
