@@ -3,15 +3,114 @@
 
 use std::path::PathBuf;
 
-use anyhow::{Context, Result};
+use anyhow::{anyhow, Context, Result};
+use base64::{engine::general_purpose::STANDARD, Engine};
+use chacha20poly1305::{
+    aead::{Aead, KeyInit},
+    ChaCha20Poly1305, Nonce,
+};
 use chrono::{DateTime, Utc};
+use rand::RngCore;
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
-use tracing::debug;
+use tracing::{debug, warn};
 
 use crate::models::{
     Adult, AdvancementDashboard, Commissioner, Event, Key3Leaders, MeritBadgeProgress,
     OrgProfile, Parent, Patrol, RankProgress, ReadyToAward, UnitInfo, Youth,
 };
+
+// Encryption constants
+const KEYRING_SERVICE: &str = "trailcache";
+const KEYRING_KEY_NAME: &str = "cache_encryption_key";
+const NONCE_SIZE: usize = 12; // ChaCha20-Poly1305 nonce size
+
+/// Retrieves the encryption key from the OS keychain, or generates a new one if not found.
+fn get_or_create_encryption_key() -> Result<[u8; 32]> {
+    let entry = keyring::Entry::new(KEYRING_SERVICE, KEYRING_KEY_NAME)
+        .context("Failed to create keyring entry for encryption key")?;
+
+    // Try to get existing key
+    match entry.get_password() {
+        Ok(key_b64) => {
+            let key_bytes = STANDARD
+                .decode(&key_b64)
+                .context("Failed to decode encryption key from keyring")?;
+            if key_bytes.len() != 32 {
+                return Err(anyhow!(
+                    "Invalid encryption key length in keyring: expected 32, got {}",
+                    key_bytes.len()
+                ));
+            }
+            let mut key = [0u8; 32];
+            key.copy_from_slice(&key_bytes);
+            debug!("Loaded encryption key from keyring");
+            Ok(key)
+        }
+        Err(keyring::Error::NoEntry) => {
+            // Generate new key
+            let mut key = [0u8; 32];
+            rand::thread_rng().fill_bytes(&mut key);
+
+            // Store in keyring
+            let key_b64 = STANDARD.encode(&key);
+            entry
+                .set_password(&key_b64)
+                .context("Failed to store encryption key in keyring")?;
+
+            debug!("Generated and stored new encryption key in keyring");
+            Ok(key)
+        }
+        Err(e) => Err(anyhow!("Failed to access keyring for encryption key: {}", e)),
+    }
+}
+
+/// Encrypts data using ChaCha20-Poly1305 with a random nonce.
+/// Returns: [12-byte nonce][ciphertext with auth tag]
+fn encrypt_data(plaintext: &[u8], key: &[u8; 32]) -> Result<Vec<u8>> {
+    let cipher = ChaCha20Poly1305::new(key.into());
+
+    // Generate random nonce
+    let mut nonce_bytes = [0u8; NONCE_SIZE];
+    rand::thread_rng().fill_bytes(&mut nonce_bytes);
+    let nonce = Nonce::from_slice(&nonce_bytes);
+
+    // Encrypt
+    let ciphertext = cipher
+        .encrypt(nonce, plaintext)
+        .map_err(|e| anyhow!("Encryption failed: {}", e))?;
+
+    // Prepend nonce to ciphertext
+    let mut result = Vec::with_capacity(NONCE_SIZE + ciphertext.len());
+    result.extend_from_slice(&nonce_bytes);
+    result.extend_from_slice(&ciphertext);
+
+    Ok(result)
+}
+
+/// Decrypts data encrypted by encrypt_data.
+/// Expects: [12-byte nonce][ciphertext with auth tag]
+fn decrypt_data(data: &[u8], key: &[u8; 32]) -> Result<Vec<u8>> {
+    if data.len() < NONCE_SIZE {
+        return Err(anyhow!(
+            "Encrypted data too short: expected at least {} bytes, got {}",
+            NONCE_SIZE,
+            data.len()
+        ));
+    }
+
+    let cipher = ChaCha20Poly1305::new(key.into());
+
+    // Extract nonce and ciphertext
+    let nonce = Nonce::from_slice(&data[..NONCE_SIZE]);
+    let ciphertext = &data[NONCE_SIZE..];
+
+    // Decrypt
+    let plaintext = cipher
+        .decrypt(nonce, ciphertext)
+        .map_err(|e| anyhow!("Decryption failed: {}", e))?;
+
+    Ok(plaintext)
+}
 
 /// Consider cache stale after 1 hour.
 /// Balances freshness with reducing unnecessary API calls for slowly-changing data.
@@ -73,16 +172,21 @@ impl<T> CachedData<T> {
 
 pub struct CacheManager {
     cache_dir: PathBuf,
+    encryption_key: [u8; 32],
 }
 
 impl CacheManager {
     pub fn new(cache_dir: PathBuf) -> Result<Self> {
         std::fs::create_dir_all(&cache_dir)?;
-        Ok(Self { cache_dir })
+        let encryption_key = get_or_create_encryption_key()?;
+        Ok(Self {
+            cache_dir,
+            encryption_key,
+        })
     }
 
     fn cache_path(&self, name: &str) -> PathBuf {
-        self.cache_dir.join(format!("{}.json", name))
+        self.cache_dir.join(format!("{}.enc", name))
     }
 
     fn load<T: DeserializeOwned>(&self, name: &str) -> Result<Option<CachedData<T>>> {
@@ -91,10 +195,19 @@ impl CacheManager {
             return Ok(None);
         }
 
-        let contents = std::fs::read_to_string(&path)
+        let ciphertext = std::fs::read(&path)
             .with_context(|| format!("Failed to read cache file: {}", name))?;
 
-        let cached: CachedData<T> = serde_json::from_str(&contents)
+        let plaintext = match decrypt_data(&ciphertext, &self.encryption_key) {
+            Ok(p) => p,
+            Err(e) => {
+                // Decryption failed - treat as cache miss
+                warn!(cache = name, error = %e, "Decryption failed, treating as cache miss");
+                return Ok(None);
+            }
+        };
+
+        let cached: CachedData<T> = serde_json::from_slice(&plaintext)
             .with_context(|| format!("Failed to parse cache file: {}", name))?;
 
         Ok(Some(cached))
@@ -103,8 +216,9 @@ impl CacheManager {
     fn save<T: Serialize>(&self, name: &str, data: &T) -> Result<()> {
         let cached = CachedData::new(data);
         let path = self.cache_path(name);
-        let contents = serde_json::to_string_pretty(&cached)?;
-        std::fs::write(&path, contents)?;
+        let plaintext = serde_json::to_vec(&cached)?;
+        let ciphertext = encrypt_data(&plaintext, &self.encryption_key)?;
+        std::fs::write(&path, ciphertext)?;
         Ok(())
     }
 
