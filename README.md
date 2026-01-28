@@ -5,7 +5,7 @@
   | || | | (_| | | | |__| (_| | (__| | | |  __/
   |_||_|  \__,_|_|_|\____\__,_|\___|_| |_|\___|
 
-       <<<  YOUR SCOUTBOOK DATA, TRAIL-READY  >>>
+       BE PREPARED... EVEN WITHOUT A SIGNAL.
 ```
 
 ---
@@ -124,16 +124,19 @@ Data is cached locally and refreshed in the background when connected, so you al
 
 ---
 
+## SECURITY
+
+Trailcache is designed with security as a priority:
+
+- **Direct Authentication** — Your credentials are sent directly to Scoutbook's servers and are never transmitted to any third-party service.
+- **Public APIs Only** — All data is retrieved using the same publicly available APIs that the Scoutbook website uses.
+- **Encrypted in Transit** — All communication with Scoutbook is encrypted over HTTPS.
+- **Encrypted at Rest** — Cached data is encrypted on your device using modern, standards-based encryption.
+- **Open Source** — The complete source code is available for inspection. No hidden functionality, no telemetry, no surprises.
+
+---
+
 ## LICENSE
 
 MIT
 
----
-
-```
-      ╔═══════════════════════════════════════════════════╗
-      ║                                                   ║
-      ║   BE PREPARED... EVEN WITHOUT A SIGNAL.           ║
-      ║                                                   ║
-      ╚═══════════════════════════════════════════════════╝
-```
