@@ -84,20 +84,9 @@ async fn main() -> Result<()> {
     // Load cached data first (for display behind login)
     let _ = app.load_from_cache().await;
 
-    // Check startup mode
-    if app.should_prompt_offline_on_startup() {
-        // App was in offline mode - prompt user to go back online
-        // Don't try to login or refresh - we're offline
-        app.state = app::AppState::ConfirmingOnline;
-    } else if !app.is_authenticated().await {
-        // Need to login
-        app.start_login();
-    } else {
-        // Online and authenticated - refresh if cache is stale
-        if app.is_cache_stale() {
-            app.refresh_all_background().await;
-        }
-    }
+    // Always require login to derive encryption key for cache
+    // (password is needed to decrypt cached data)
+    app.start_login();
 
     // Main loop
     let result = run_app(&mut terminal, &mut app).await;

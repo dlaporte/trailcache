@@ -454,7 +454,8 @@ impl App {
             debug!("No session data found");
         }
 
-        let cache = CacheManager::new(cache_dir)?;
+        // Create cache manager without encryption initially - will be enabled after login
+        let cache = CacheManager::new_without_encryption(cache_dir)?;
 
         let (tx, rx) = mpsc::channel(CHANNEL_BUFFER_SIZE);
 
@@ -567,6 +568,7 @@ impl App {
     // =========================================================================
 
     /// Check if the user is authenticated with a valid session
+    #[allow(dead_code)]
     pub async fn is_authenticated(&self) -> bool {
         self.session.data.as_ref().map(|d| !d.is_expired()).unwrap_or(false)
     }
@@ -662,6 +664,37 @@ impl App {
 
         self.login_error = None;
 
+        // If offline mode, just derive key and load cache (no API call)
+        if self.offline_mode {
+            if let Some(ref org_guid) = self.config.organization_guid {
+                // Derive encryption key from password
+                self.cache.set_password(&password, org_guid);
+
+                // Try to load cache to verify password is correct
+                if let Err(e) = self.load_from_cache().await {
+                    self.login_error = Some("Failed to decrypt cache. Wrong password?".to_string());
+                    return Err(e);
+                }
+
+                // Check if we actually loaded any data
+                if self.youth.is_empty() {
+                    self.login_error = Some("No cached data found. Go online to download.".to_string());
+                    return Err(anyhow::anyhow!("No cached data"));
+                }
+
+                self.config.last_username = Some(username);
+                let _ = self.config.save();
+                self.login_password.clear();
+                self.state = AppState::Normal;
+                info!("Offline login successful - loaded from cache");
+                return Ok(());
+            } else {
+                self.login_error = Some("No organization configured. Go online first.".to_string());
+                return Err(anyhow::anyhow!("No organization GUID"));
+            }
+        }
+
+        // Online mode - authenticate with API
         match self.api.authenticate(&username, &password).await {
             Ok(session_data) => {
                 if let Err(e) = CredentialStore::store(&username, &password) {
@@ -670,6 +703,9 @@ impl App {
 
                 self.config.last_username = Some(username);
                 self.config.organization_guid = Some(session_data.organization_guid.clone());
+
+                // Enable cache encryption with password-derived key
+                self.cache.set_password(&password, &session_data.organization_guid);
 
                 if let Err(e) = self.config.save() {
                     warn!(error = %e, "Failed to save config");
@@ -683,6 +719,12 @@ impl App {
 
                 if let Some(ref data) = self.session.data {
                     self.api.set_token(data.token.clone());
+                }
+
+                // Load any existing cache and refresh
+                let _ = self.load_from_cache().await;
+                if self.is_cache_stale() {
+                    self.refresh_all_background().await;
                 }
 
                 self.login_password.clear();
@@ -907,6 +949,7 @@ impl App {
     }
 
     /// Check if app should show offline mode prompt on startup
+    #[allow(dead_code)]
     pub fn should_prompt_offline_on_startup(&self) -> bool {
         self.offline_mode
     }

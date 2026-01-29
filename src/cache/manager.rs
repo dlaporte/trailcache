@@ -1,7 +1,7 @@
 use std::path::PathBuf;
 
 use anyhow::{anyhow, Context, Result};
-use base64::{engine::general_purpose::STANDARD, Engine};
+use argon2::Argon2;
 use chacha20poly1305::{
     aead::{Aead, KeyInit},
     ChaCha20Poly1305, Nonce,
@@ -17,48 +17,17 @@ use crate::models::{
 };
 
 // Encryption constants
-const KEYRING_SERVICE: &str = "trailcache";
-const KEYRING_KEY_NAME: &str = "cache_encryption_key";
 const NONCE_SIZE: usize = 12; // ChaCha20-Poly1305 nonce size
 
-/// Retrieves the encryption key from the OS keychain, or generates a new one if not found.
-fn get_or_create_encryption_key() -> Result<[u8; 32]> {
-    let entry = keyring::Entry::new(KEYRING_SERVICE, KEYRING_KEY_NAME)
-        .context("Failed to create keyring entry for encryption key")?;
-
-    // Try to get existing key
-    match entry.get_password() {
-        Ok(key_b64) => {
-            let key_bytes = STANDARD
-                .decode(&key_b64)
-                .context("Failed to decode encryption key from keyring")?;
-            if key_bytes.len() != 32 {
-                return Err(anyhow!(
-                    "Invalid encryption key length in keyring: expected 32, got {}",
-                    key_bytes.len()
-                ));
-            }
-            let mut key = [0u8; 32];
-            key.copy_from_slice(&key_bytes);
-            debug!("Loaded encryption key from keyring");
-            Ok(key)
-        }
-        Err(keyring::Error::NoEntry) => {
-            // Generate new key
-            let mut key = [0u8; 32];
-            rand::thread_rng().fill_bytes(&mut key);
-
-            // Store in keyring
-            let key_b64 = STANDARD.encode(&key);
-            entry
-                .set_password(&key_b64)
-                .context("Failed to store encryption key in keyring")?;
-
-            debug!("Generated and stored new encryption key in keyring");
-            Ok(key)
-        }
-        Err(e) => Err(anyhow!("Failed to access keyring for encryption key: {}", e)),
-    }
+/// Derive a 256-bit encryption key from password and salt using Argon2.
+/// The same password + salt always produces the same key.
+fn derive_key_from_password(password: &str, salt: &str) -> [u8; 32] {
+    let mut key = [0u8; 32];
+    // Use Argon2id with default parameters - secure and reasonably fast
+    Argon2::default()
+        .hash_password_into(password.as_bytes(), salt.as_bytes(), &mut key)
+        .expect("Argon2 key derivation failed");
+    key
 }
 
 /// Encrypts data using ChaCha20-Poly1305 with a random nonce.
@@ -173,13 +142,22 @@ pub struct CacheManager {
 }
 
 impl CacheManager {
-    pub fn new(cache_dir: PathBuf) -> Result<Self> {
+    /// Create a CacheManager without encryption (for pre-login state).
+    /// Cache operations will fail until set_password is called.
+    pub fn new_without_encryption(cache_dir: PathBuf) -> Result<Self> {
         std::fs::create_dir_all(&cache_dir)?;
-        let encryption_key = get_or_create_encryption_key()?;
         Ok(Self {
             cache_dir,
-            encryption_key,
+            encryption_key: [0u8; 32], // Placeholder - will fail to decrypt
         })
+    }
+
+    /// Set encryption key derived from password + org_guid.
+    /// Must be called after login before cache operations will work.
+    pub fn set_password(&mut self, password: &str, org_guid: &str) {
+        use tracing::info;
+        self.encryption_key = derive_key_from_password(password, org_guid);
+        info!("Encryption key derived from password");
     }
 
     fn cache_path(&self, name: &str) -> PathBuf {
@@ -198,9 +176,8 @@ impl CacheManager {
         let plaintext = match decrypt_data(&ciphertext, &self.encryption_key) {
             Ok(p) => p,
             Err(e) => {
-                // Decryption failed (likely key changed) - delete bad file and treat as cache miss
-                debug!(cache = name, error = %e, "Decryption failed, removing stale cache file");
-                let _ = std::fs::remove_file(&path);
+                // Decryption failed - treat as cache miss (don't delete, key might be recoverable)
+                debug!(cache = name, error = %e, "Decryption failed, treating as cache miss");
                 return Ok(None);
             }
         };
