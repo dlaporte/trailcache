@@ -1029,7 +1029,7 @@ impl App {
         // Base items: youth, adults, parents, patrols, events, dashboard, ready_to_award, key3, pin, profile, commissioners
         let base_items = 11;
 
-        Self::send_result(&tx, RefreshResult::CachingProgress(0, base_items, "Fetching roster data...".to_string())).await;
+        Self::send_result(&tx, RefreshResult::CachingProgress(0, base_items, "Fetching roster data".to_string())).await;
 
         // Create API client
         let base_api = match ApiClient::new() {
@@ -1045,7 +1045,7 @@ impl App {
         let mut completed = 0;
 
         // Fetch youth
-        Self::send_result(&tx, RefreshResult::CachingProgress(completed, base_items, "Fetching scouts...".to_string())).await;
+        Self::send_result(&tx, RefreshResult::CachingProgress(completed, base_items, "Fetching scouts".to_string())).await;
         let youth_res = api.fetch_youth(&org_guid).await;
         let youth_user_ids: Vec<i64> = youth_res
             .as_ref()
@@ -1055,25 +1055,25 @@ impl App {
         completed += 1;
 
         // Fetch adults
-        Self::send_result(&tx, RefreshResult::CachingProgress(completed, base_items, "Fetching adults...".to_string())).await;
+        Self::send_result(&tx, RefreshResult::CachingProgress(completed, base_items, "Fetching adults".to_string())).await;
         let adults_res = api.fetch_adults(&org_guid).await;
         Self::send_fetch_result(&tx, "Adults", adults_res, RefreshResult::Adults).await;
         completed += 1;
 
         // Fetch parents
-        Self::send_result(&tx, RefreshResult::CachingProgress(completed, base_items, "Fetching parents...".to_string())).await;
+        Self::send_result(&tx, RefreshResult::CachingProgress(completed, base_items, "Fetching parents".to_string())).await;
         let parents_res = api.fetch_parents(&org_guid).await;
         Self::send_fetch_result_or_empty(&tx, "Parents", parents_res, RefreshResult::Parents, vec![]).await;
         completed += 1;
 
         // Fetch patrols
-        Self::send_result(&tx, RefreshResult::CachingProgress(completed, base_items, "Fetching patrols...".to_string())).await;
+        Self::send_result(&tx, RefreshResult::CachingProgress(completed, base_items, "Fetching patrols".to_string())).await;
         let patrols_res = api.fetch_patrols(&org_guid).await;
         Self::send_fetch_result_or_empty(&tx, "Patrols", patrols_res, RefreshResult::Patrols, vec![]).await;
         completed += 1;
 
         // Fetch events
-        Self::send_result(&tx, RefreshResult::CachingProgress(completed, base_items, "Fetching events...".to_string())).await;
+        Self::send_result(&tx, RefreshResult::CachingProgress(completed, base_items, "Fetching events".to_string())).await;
         let events_res = api.fetch_events(user_id).await;
         if let Ok(ref events) = events_res {
             Self::send_result(&tx, RefreshResult::Events(events.clone())).await;
@@ -1081,37 +1081,37 @@ impl App {
         completed += 1;
 
         // Fetch dashboard
-        Self::send_result(&tx, RefreshResult::CachingProgress(completed, base_items, "Fetching advancement dashboard...".to_string())).await;
+        Self::send_result(&tx, RefreshResult::CachingProgress(completed, base_items, "Fetching advancement dashboard".to_string())).await;
         let dashboard_res = api.fetch_advancement_dashboard(&org_guid).await;
         Self::send_fetch_result_or_default(&tx, "Dashboard", dashboard_res, RefreshResult::AdvancementDashboard).await;
         completed += 1;
 
         // Fetch ready to award
-        Self::send_result(&tx, RefreshResult::CachingProgress(completed, base_items, "Fetching ready to award...".to_string())).await;
+        Self::send_result(&tx, RefreshResult::CachingProgress(completed, base_items, "Fetching ready to award".to_string())).await;
         let ready_res = api.fetch_ready_to_award(&org_guid).await;
         Self::send_fetch_result_or_empty(&tx, "ReadyToAward", ready_res, RefreshResult::ReadyToAward, vec![]).await;
         completed += 1;
 
         // Fetch key3
-        Self::send_result(&tx, RefreshResult::CachingProgress(completed, base_items, "Fetching unit leadership...".to_string())).await;
+        Self::send_result(&tx, RefreshResult::CachingProgress(completed, base_items, "Fetching unit leadership".to_string())).await;
         let key3_res = api.fetch_key3(&org_guid).await;
         Self::send_key3_result(&tx, key3_res).await;
         completed += 1;
 
         // Fetch unit pin info
-        Self::send_result(&tx, RefreshResult::CachingProgress(completed, base_items, "Fetching unit info...".to_string())).await;
+        Self::send_result(&tx, RefreshResult::CachingProgress(completed, base_items, "Fetching unit info".to_string())).await;
         let pin_res = api.fetch_unit_pin(&org_guid).await;
         Self::send_pin_result(&tx, pin_res).await;
         completed += 1;
 
         // Fetch org profile
-        Self::send_result(&tx, RefreshResult::CachingProgress(completed, base_items, "Fetching organization profile...".to_string())).await;
+        Self::send_result(&tx, RefreshResult::CachingProgress(completed, base_items, "Fetching organization profile".to_string())).await;
         let profile_res = api.fetch_org_profile(&org_guid).await;
         Self::send_profile_result(&tx, profile_res).await;
         completed += 1;
 
         // Fetch commissioners
-        Self::send_result(&tx, RefreshResult::CachingProgress(completed, base_items, "Fetching commissioners...".to_string())).await;
+        Self::send_result(&tx, RefreshResult::CachingProgress(completed, base_items, "Fetching commissioners".to_string())).await;
         match api.fetch_commissioners(&org_guid).await {
             Ok(commissioners) => {
                 Self::send_result(&tx, RefreshResult::Commissioners(commissioners)).await;
@@ -1130,7 +1130,7 @@ impl App {
             Self::send_result(&tx, RefreshResult::CachingProgress(
                 per_youth_completed,
                 per_youth_total,
-                format!("Fetching advancement data for {} scouts...", total_youth)
+                format!("Fetching advancement for {} scouts", total_youth)
             )).await;
 
             const MAX_CONCURRENT: usize = 5;
@@ -1165,11 +1165,10 @@ impl App {
                     }
                     per_youth_completed += 1;
 
-                    let pct = (per_youth_completed * 100) / per_youth_total;
                     Self::send_result(&tx, RefreshResult::CachingProgress(
                         per_youth_completed,
                         per_youth_total,
-                        format!("Caching scout data... {}%", pct)
+                        "Caching scout advancement data".to_string()
                     )).await;
                 }
             }
@@ -1282,7 +1281,7 @@ impl App {
         );
 
         Self::send_result(tx, RefreshResult::CachingProgress(
-            0, total_reqs, "Caching rank requirements...".to_string()
+            0, total_reqs, "Caching rank requirements".to_string()
         )).await;
 
         // Fetch rank requirements with limited concurrency
@@ -1307,15 +1306,10 @@ impl App {
                 completed += 1;
             }
 
-            let pct = if total_reqs > 0 { (completed * 100) / total_reqs } else { 0 };
             Self::send_result(tx, RefreshResult::CachingProgress(
-                completed, total_reqs, format!("Caching requirements... {}%", pct)
+                completed, total_reqs, "Caching rank requirements".to_string()
             )).await;
         }
-
-        Self::send_result(tx, RefreshResult::CachingProgress(
-            completed, total_reqs, "Caching merit badge requirements...".to_string()
-        )).await;
 
         // Fetch badge requirements with limited concurrency
         for chunk in badge_reqs_to_fetch.chunks(MAX_CONCURRENT) {
@@ -1338,9 +1332,8 @@ impl App {
                 completed += 1;
             }
 
-            let pct = if total_reqs > 0 { (completed * 100) / total_reqs } else { 0 };
             Self::send_result(tx, RefreshResult::CachingProgress(
-                completed, total_reqs, format!("Caching requirements... {}%", pct)
+                completed, total_reqs, "Caching badge requirements".to_string()
             )).await;
         }
 
