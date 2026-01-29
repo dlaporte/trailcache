@@ -1,6 +1,6 @@
 [package]
 name = "trailcache"
-version = "0.2.6"
+version = "0.2.7"
 edition = "2021"
 description = "A blazing-fast TUI for Scout troop management - works offline"
 authors = ["David LaPorte"]
@@ -29,7 +29,6 @@ keyring = "3"
 chacha20poly1305 = "0.10"
 argon2 = "0.5"  # Key derivation from password
 rand = "0.8"
-base64 = "0.22"
 
 # Date/time handling
 chrono = { version = "0.4", features = ["serde"] }
