@@ -725,11 +725,23 @@ impl App {
 
     /// Load all data from cache
     pub async fn load_from_cache(&mut self) -> Result<()> {
-        if let Ok(Some(cached)) = self.cache.load_youth() {
-            self.youth = cached.data;
+        info!(cache_dir = ?self.cache.cache_dir(), "Loading from cache");
+
+        match self.cache.load_youth() {
+            Ok(Some(cached)) => {
+                info!(count = cached.data.len(), age = %cached.age_display(), "Loaded youth from cache");
+                self.youth = cached.data;
+            }
+            Ok(None) => {
+                info!("No youth cache found");
+            }
+            Err(e) => {
+                warn!(error = %e, "Failed to load youth cache");
+            }
         }
 
         if let Ok(Some(cached)) = self.cache.load_adults() {
+            info!(count = cached.data.len(), "Loaded adults from cache");
             self.adults = cached.data;
         }
 
@@ -1777,15 +1789,34 @@ impl App {
                         Self::send_result(&tx, RefreshResult::CachingComplete).await;
                     });
                 } else {
-                    // All done - enable offline mode
+                    // All done - verify cache files exist before enabling offline mode
+                    let missing = self.cache.verify_cache();
+                    if !missing.is_empty() {
+                        error!(missing_files = ?missing, cache_dir = ?self.cache.cache_dir(), "Cache verification failed");
+                        self.caching_in_progress = false;
+                        self.status_message = Some(format!(
+                            "Caching failed - missing: {}. Check logs.",
+                            missing.join(", ")
+                        ));
+                        return;
+                    }
+
+                    // Enable offline mode
                     self.caching_in_progress = false;
                     self.offline_mode = true;
                     self.config.offline_mode = true;
                     if let Err(e) = self.config.save() {
                         warn!(error = %e, "Failed to save config after offline caching");
+                        self.status_message = Some("Caching complete but config save failed".to_string());
+                        return;
                     }
-                    self.status_message = Some("Offline mode ready - all data cached".to_string());
-                    info!("Offline caching complete, offline mode enabled");
+
+                    // Log success with cache location for debugging
+                    info!(cache_dir = ?self.cache.cache_dir(), youth_count = self.youth.len(), "Offline caching complete");
+                    self.status_message = Some(format!(
+                        "Offline mode ready - {} scouts cached",
+                        self.youth.len()
+                    ));
                 }
             }
             RefreshResult::Error(msg) => {

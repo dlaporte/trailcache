@@ -458,6 +458,44 @@ impl CacheManager {
         ];
         stale_checks.iter().any(|&stale| stale)
     }
+
+    /// Verify that essential cache files exist and are readable.
+    /// Returns a list of missing or unreadable cache files.
+    pub fn verify_cache(&self) -> Vec<String> {
+        let mut missing = Vec::new();
+
+        // Check essential cache files exist
+        let essential_files = ["youth", "adults", "events"];
+
+        for name in essential_files {
+            let path = self.cache_path(name);
+            if !path.exists() {
+                missing.push(format!("{} (file missing)", name));
+            }
+        }
+
+        // Also verify youth can be loaded (not just that file exists)
+        match self.load_youth() {
+            Ok(Some(data)) => {
+                debug!(count = data.data.len(), "Youth cache verified");
+            }
+            Ok(None) => {
+                if !missing.iter().any(|m| m.starts_with("youth")) {
+                    missing.push("youth (empty or unreadable)".to_string());
+                }
+            }
+            Err(e) => {
+                missing.push(format!("youth (error: {})", e));
+            }
+        }
+
+        missing
+    }
+
+    /// Get the cache directory path for diagnostic purposes.
+    pub fn cache_dir(&self) -> &PathBuf {
+        &self.cache_dir
+    }
 }
 
 #[derive(Debug, Default)]
