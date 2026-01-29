@@ -686,6 +686,7 @@ impl App {
                 let _ = self.config.save();
                 self.login_password.clear();
                 self.state = AppState::Normal;
+                self.status_message = Some("Offline mode - loaded from cache".to_string());
                 info!("Offline login successful - loaded from cache");
                 return Ok(());
             } else {
