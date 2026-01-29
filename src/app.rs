@@ -855,6 +855,11 @@ impl App {
 
     /// Spawn a background task to refresh all data
     pub async fn refresh_all_background(&mut self) {
+        // Don't refresh in offline mode
+        if self.offline_mode {
+            return;
+        }
+
         info!("Starting background refresh of all data");
 
         let org_guid = match &self.config.organization_guid {
@@ -1901,6 +1906,11 @@ impl App {
     /// Refresh only data for the current tab
     #[allow(dead_code)]
     pub async fn refresh_current_tab(&mut self) {
+        // Don't refresh in offline mode
+        if self.offline_mode {
+            return;
+        }
+
         let org_guid = match &self.config.organization_guid {
             Some(guid) => Arc::new(guid.clone()),
             None => return,
@@ -1993,6 +2003,11 @@ impl App {
     /// Fetch event guests for a specific event
     #[allow(dead_code)]
     pub async fn fetch_event_guests(&mut self, event_id: i64) {
+        // In offline mode, don't fetch (event guests aren't cached)
+        if self.offline_mode {
+            return;
+        }
+
         let token = match self.session.token() {
             Some(t) => t.to_string(),
             None => return,
@@ -2019,6 +2034,17 @@ impl App {
     pub async fn fetch_youth_progress(&mut self, user_id: i64) {
         if user_id <= 0 {
             warn!(user_id, "Invalid user_id for youth progress fetch");
+            return;
+        }
+
+        // In offline mode, use cached data only
+        if self.offline_mode {
+            if let Ok(Some(cached)) = self.cache.load_youth_ranks(user_id) {
+                self.selected_youth_ranks = cached.data;
+            }
+            if let Ok(Some(cached)) = self.cache.load_youth_merit_badges(user_id) {
+                self.selected_youth_badges = cached.data;
+            }
             return;
         }
 
