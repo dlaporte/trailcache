@@ -1367,7 +1367,7 @@ impl App {
     {
         match result {
             Ok(data) => {
-                debug!("{} fetched successfully", name);
+                info!("{} fetched successfully, sending to channel", name);
                 Self::send_result(tx, wrapper(data)).await;
             }
             Err(e) => {
@@ -1549,16 +1549,20 @@ impl App {
     fn process_refresh_result(&mut self, result: RefreshResult) {
         match result {
             RefreshResult::Youth(data) => {
-                if let Err(e) = self.cache.save_youth(&data) {
-                    warn!(error = %e, "Failed to cache youth data");
+                info!(count = data.len(), "Processing Youth result - saving to cache");
+                match self.cache.save_youth(&data) {
+                    Ok(()) => info!("Youth cache saved successfully"),
+                    Err(e) => error!(error = %e, "Failed to cache youth data"),
                 }
                 self.youth = data;
                 self.cache_ages = self.cache.get_cache_ages();
             }
             RefreshResult::Adults(data) => {
+                info!(count = data.len(), "Processing Adults result - saving to cache");
                 let deduped = Self::deduplicate_adults(data);
-                if let Err(e) = self.cache.save_adults(&deduped) {
-                    warn!(error = %e, "Failed to cache adults data");
+                match self.cache.save_adults(&deduped) {
+                    Ok(()) => info!("Adults cache saved successfully"),
+                    Err(e) => error!(error = %e, "Failed to cache adults data"),
                 }
                 self.adults = deduped;
             }
