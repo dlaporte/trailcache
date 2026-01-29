@@ -54,6 +54,18 @@ const MAX_CONCURRENT_REQUESTS: usize = 10;
 const MAX_EVENT_GUESTS_CACHE_SIZE: usize = 50;
 
 // ============================================================================
+// Helper Functions
+// ============================================================================
+
+/// Create an authenticated API client with the given token.
+/// This is a free function to allow use inside spawned async tasks.
+fn create_authenticated_api(token: String) -> Result<ApiClient> {
+    let mut api = ApiClient::new()?;
+    api.set_token(token);
+    Ok(api)
+}
+
+// ============================================================================
 // Rank Ordering
 // ============================================================================
 
@@ -988,12 +1000,9 @@ impl App {
 
         debug!(count = user_ids.len(), "Fetching ranks, badges, and leadership for all youth");
 
-        // Create API client with Arc-wrapped token (cheap clone)
-        let api = match ApiClient::new() {
-            Ok(mut api) => {
-                api.set_token(Arc::clone(token));
-                api
-            }
+        // Create API client
+        let api = match create_authenticated_api(token.to_string()) {
+            Ok(api) => api,
             Err(e) => {
                 error!(error = %e, "Failed to create API client for youth advancement");
                 return;
@@ -1043,12 +1052,9 @@ impl App {
     ) {
         info!("Fetching all requirements for offline mode");
 
-        // Create API client with Arc-wrapped token (cheap clone)
-        let api = match ApiClient::new() {
-            Ok(mut api) => {
-                api.set_token(Arc::clone(token));
-                api
-            }
+        // Create API client
+        let api = match create_authenticated_api(token.to_string()) {
+            Ok(api) => api,
             Err(e) => {
                 error!(error = %e, "Failed to create API client for requirements fetch");
                 return;
@@ -1569,11 +1575,8 @@ impl App {
         let tab = self.current_tab;
 
         tokio::spawn(async move {
-            let api = match ApiClient::new() {
-                Ok(mut api) => {
-                    api.set_token((*token).clone());
-                    api
-                }
+            let api = match create_authenticated_api(token.to_string()) {
+                Ok(api) => api,
                 Err(e) => {
                     error!(error = %e, "Failed to create API client for tab refresh");
                     return;
@@ -1653,11 +1656,8 @@ impl App {
         let tx = self.refresh_tx.clone();
 
         tokio::spawn(async move {
-            let api = match ApiClient::new() {
-                Ok(mut api) => {
-                    api.set_token(token);
-                    api
-                }
+            let api = match create_authenticated_api(token) {
+                Ok(api) => api,
                 Err(e) => {
                     error!(error = %e, "Failed to create API client for event guests");
                     return;
@@ -1698,11 +1698,8 @@ impl App {
 
         // Fetch fresh data in background
         tokio::spawn(async move {
-            let api = match ApiClient::new() {
-                Ok(mut api) => {
-                    api.set_token(token);
-                    api
-                }
+            let api = match create_authenticated_api(token) {
+                Ok(api) => api,
                 Err(e) => {
                     error!(error = %e, "Failed to create API client for youth progress");
                     return;
@@ -1751,11 +1748,8 @@ impl App {
 
         // Fetch fresh data in background
         tokio::spawn(async move {
-            let api = match ApiClient::new() {
-                Ok(mut api) => {
-                    api.set_token(token);
-                    api
-                }
+            let api = match create_authenticated_api(token) {
+                Ok(api) => api,
                 Err(e) => {
                     error!(error = %e, "Failed to create API client for youth leadership");
                     return;
@@ -1795,11 +1789,8 @@ impl App {
         let rid = rank_id;
 
         tokio::spawn(async move {
-            let api = match ApiClient::new() {
-                Ok(mut api) => {
-                    api.set_token(token);
-                    api
-                }
+            let api = match create_authenticated_api(token) {
+                Ok(api) => api,
                 Err(e) => {
                     error!(error = %e, "Failed to create API client for rank requirements");
                     return;
@@ -1841,11 +1832,8 @@ impl App {
         let bid = badge_id;
 
         tokio::spawn(async move {
-            let api = match ApiClient::new() {
-                Ok(mut api) => {
-                    api.set_token(token);
-                    api
-                }
+            let api = match create_authenticated_api(token) {
+                Ok(api) => api,
                 Err(e) => {
                     error!(error = %e, "Failed to create API client for badge requirements");
                     return;

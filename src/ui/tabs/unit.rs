@@ -194,12 +194,16 @@ fn render_training(frame: &mut Frame, app: &App, area: Rect) {
         },
     ]));
 
-    // List expired/expiring - show all
+    // Calculate max name length across both training sections for alignment
+    let ypt_max = training_stats.ypt_issues.iter().map(|(n, _)| n.len()).max().unwrap_or(0);
+    let pos_max = training_stats.position_not_trained_list.iter().map(|n| n.len()).max().unwrap_or(0);
+    let training_name_width = ypt_max.max(pos_max) + 2;
+
+    // List expired/expiring - show all with aligned values
     for (name, status) in training_stats.ypt_issues.iter() {
         lines.push(Line::from(vec![
             Span::raw("  "),
-            Span::styled(name, styles::list_item_style()),
-            Span::raw("  "),
+            Span::styled(format!("{:<width$}", name, width = training_name_width), styles::list_item_style()),
             Span::styled(status, styles::error_style()),
         ]));
     }
@@ -219,12 +223,11 @@ fn render_training(frame: &mut Frame, app: &App, area: Rect) {
         },
     ]));
 
-    // List not trained adults - show all
+    // List not trained adults - show all with aligned values
     for name in training_stats.position_not_trained_list.iter() {
         lines.push(Line::from(vec![
             Span::raw("  "),
-            Span::styled(name, styles::list_item_style()),
-            Span::raw("  "),
+            Span::styled(format!("{:<width$}", name, width = training_name_width), styles::list_item_style()),
             Span::styled("Not Trained", styles::error_style()),
         ]));
     }
@@ -244,6 +247,11 @@ fn render_renewals(frame: &mut Frame, app: &App, area: Rect) {
 
     let renewal_stats = calculate_renewal_stats(app);
 
+    // Calculate max name length across both scout and adult sections for alignment
+    let scout_max = renewal_stats.scout_issues.iter().map(|(n, _)| n.len()).max().unwrap_or(0);
+    let adult_max = renewal_stats.adult_issues.iter().map(|(n, _)| n.len()).max().unwrap_or(0);
+    let renewal_name_width = scout_max.max(adult_max) + 2;
+
     // Scouts
     lines.push(Line::from(Span::styled("Scouts", styles::highlight_style())));
     lines.push(Line::from(vec![
@@ -257,12 +265,11 @@ fn render_renewals(frame: &mut Frame, app: &App, area: Rect) {
         },
     ]));
 
-    // List all scout issues
+    // List all scout issues with aligned values
     for (name, date) in renewal_stats.scout_issues.iter() {
         lines.push(Line::from(vec![
             Span::raw("  "),
-            Span::styled(name, styles::list_item_style()),
-            Span::raw("  "),
+            Span::styled(format!("{:<width$}", name, width = renewal_name_width), styles::list_item_style()),
             Span::styled(date, styles::error_style()),
         ]));
     }
@@ -282,12 +289,11 @@ fn render_renewals(frame: &mut Frame, app: &App, area: Rect) {
         },
     ]));
 
-    // List all adult issues
+    // List all adult issues with aligned values
     for (name, date) in renewal_stats.adult_issues.iter() {
         lines.push(Line::from(vec![
             Span::raw("  "),
-            Span::styled(name, styles::list_item_style()),
-            Span::raw("  "),
+            Span::styled(format!("{:<width$}", name, width = renewal_name_width), styles::list_item_style()),
             Span::styled(date, styles::error_style()),
         ]));
     }

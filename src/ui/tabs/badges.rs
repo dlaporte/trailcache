@@ -158,12 +158,16 @@ fn render_badge_list(frame: &mut Frame, app: &App, area: Rect) {
                 styles::list_item_style()
             };
 
-            let eagle_marker = if *is_eagle { "*" } else { " " };
+            let eagle_marker = if *is_eagle { "* " } else { "  " };
+            let marker_style = if *is_eagle { styles::highlight_style() } else { style };
 
             Row::new(vec![
-                Cell::from(format!("{}{}", eagle_marker, truncate(name, 28))),
-                Cell::from(format!("{:>6}", count)),
-            ]).style(style)
+                Cell::from(Line::from(vec![
+                    Span::styled(eagle_marker, marker_style),
+                    Span::styled(truncate(name, 27), style),
+                ])),
+                Cell::from(format!("{:>6}", count)).style(style),
+            ])
         }).collect()
     };
 
@@ -235,21 +239,28 @@ fn render_scout_list(frame: &mut Frame, app: &App, area: Rect) {
                 styles::list_item_style()
             };
 
+            let format_date = |d: &str| -> String {
+                chrono::NaiveDate::parse_from_str(&d[..10.min(d.len())], "%Y-%m-%d")
+                    .ok()
+                    .map(|parsed| parsed.format("%b %d, %Y").to_string())
+                    .unwrap_or_else(|| d.chars().take(10).collect())
+            };
+
             let progress = if sbp.badge.is_awarded() {
                 let date = sbp.badge.awarded_date.as_ref()
                     .or(sbp.badge.date_completed.as_ref())
-                    .map(|d| d.chars().take(10).collect::<String>())
+                    .map(|d| format_date(d))
                     .unwrap_or_else(|| "Awarded".to_string());
                 (date, styles::success_style())
             } else if sbp.badge.is_completed() {
                 let date = sbp.badge.date_completed.as_ref()
-                    .map(|d| d.chars().take(10).collect::<String>())
+                    .map(|d| format_date(d))
                     .unwrap_or_else(|| "Done".to_string());
                 (date, styles::highlight_style())
             } else if let Some(pct) = sbp.badge.progress_percent() {
-                (format!("{:>3}%", pct), styles::muted_style())
+                (format!("{}%", pct), styles::muted_style())
             } else {
-                ("  -".to_string(), styles::muted_style())
+                ("-".to_string(), styles::muted_style())
             };
 
             Row::new(vec![
@@ -348,10 +359,14 @@ fn render_requirements_view(frame: &mut Frame, app: &App, area: Rect, focused: b
             if is_selected && req.is_completed() {
                 if let Some(ref date) = req.date_completed {
                     if !date.is_empty() {
+                        let formatted_date = chrono::NaiveDate::parse_from_str(&date[..10.min(date.len())], "%Y-%m-%d")
+                            .ok()
+                            .map(|d| d.format("%b %d, %Y").to_string())
+                            .unwrap_or_else(|| date.chars().take(10).collect());
                         lines.push(Line::from(vec![
                             Span::raw("          "),
                             Span::styled("Completed: ", styles::muted_style()),
-                            Span::styled(date.chars().take(10).collect::<String>(), styles::highlight_style()),
+                            Span::styled(formatted_date, styles::highlight_style()),
                         ]));
                     }
                 }

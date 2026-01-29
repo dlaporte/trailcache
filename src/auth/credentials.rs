@@ -1,6 +1,3 @@
-// Allow dead code: Infrastructure methods for future use
-#![allow(dead_code)]
-
 use anyhow::{Context, Result};
 use keyring::Entry;
 
@@ -29,6 +26,7 @@ impl CredentialStore {
     }
 
     /// Delete stored credentials for a username
+    #[allow(dead_code)]
     pub fn delete(username: &str) -> Result<()> {
         let entry = Entry::new(SERVICE_NAME, username)
             .context("Failed to create keyring entry")?;

@@ -1,6 +1,3 @@
-// Allow dead code: Infrastructure methods for future use
-#![allow(dead_code)]
-
 use std::path::PathBuf;
 
 use anyhow::{Context, Result};
@@ -34,17 +31,20 @@ impl SessionData {
     }
 
     /// Check if the session will expire soon and should be refreshed
+    #[allow(dead_code)]
     pub fn needs_refresh(&self) -> bool {
         let refresh_at = self.created_at + Duration::minutes(TOKEN_EXPIRY_MINUTES - TOKEN_REFRESH_BUFFER_MINUTES);
         Utc::now() > refresh_at
     }
 
+    #[allow(dead_code)]
     pub fn time_until_expiry(&self) -> Duration {
         let expiry = self.created_at + Duration::minutes(TOKEN_EXPIRY_MINUTES);
         expiry - Utc::now()
     }
 
     /// Get minutes remaining until expiry (for display)
+    #[allow(dead_code)]
     pub fn minutes_until_expiry(&self) -> i64 {
         self.time_until_expiry().num_minutes().max(0)
     }
@@ -94,6 +94,7 @@ impl Session {
     }
 
     /// Clear session data
+    #[allow(dead_code)]
     pub fn clear(&mut self) -> Result<()> {
         self.data = None;
         let path = self.session_path();
@@ -119,6 +120,7 @@ impl Session {
     }
 
     /// Check if session is valid (exists and not expired)
+    #[allow(dead_code)]
     pub fn is_valid(&self) -> bool {
         self.data.as_ref().map(|d| !d.is_expired()).unwrap_or(false)
     }

@@ -1,6 +1,3 @@
-// Allow dead code: Style functions defined for consistent UI
-#![allow(dead_code)]
-
 use ratatui::style::{Color, Modifier, Style};
 
 // Color palette
@@ -60,6 +57,7 @@ pub fn border_style(focused: bool) -> Style {
     }
 }
 
+#[allow(dead_code)]
 pub fn search_style() -> Style {
     Style::default().fg(ACCENT)
 }
@@ -75,18 +73,5 @@ pub fn help_key_style() -> Style {
 }
 
 pub fn help_desc_style() -> Style {
-    Style::default().fg(Color::White)
-}
-
-// Rank-specific colors for charts (all white for consistency)
-pub fn eagle_style() -> Style {
-    Style::default().fg(Color::White)
-}
-
-pub fn life_style() -> Style {
-    Style::default().fg(Color::White)
-}
-
-pub fn star_style() -> Style {
     Style::default().fg(Color::White)
 }

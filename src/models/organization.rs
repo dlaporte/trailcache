@@ -1,6 +1,3 @@
-// Allow dead code: API response structs have fields for completeness
-#![allow(dead_code)]
-
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -18,6 +15,7 @@ pub struct Patrol {
 }
 
 impl Patrol {
+    #[allow(dead_code)]
     pub fn display_member_count(&self) -> String {
         match self.member_count {
             Some(count) => format!("{} members", count),

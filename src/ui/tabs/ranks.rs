@@ -268,25 +268,32 @@ fn render_scout_list(frame: &mut Frame, app: &App, area: Rect) {
                 styles::list_item_style()
             };
 
+            let format_date = |d: &str| -> String {
+                chrono::NaiveDate::parse_from_str(&d[..10.min(d.len())], "%Y-%m-%d")
+                    .ok()
+                    .map(|parsed| parsed.format("%b %d, %Y").to_string())
+                    .unwrap_or_else(|| d.chars().take(10).collect())
+            };
+
             let progress = match &srp.rank {
                 Some(rank) if rank.is_awarded() => {
                     let date = rank.date_awarded.as_ref()
                         .or(rank.date_completed.as_ref())
-                        .map(|d| d.chars().take(10).collect::<String>())
+                        .map(|d| format_date(d))
                         .unwrap_or_else(|| "Awarded".to_string());
                     (date, styles::success_style())
                 }
                 Some(rank) if rank.is_completed() => {
                     let date = rank.date_completed.as_ref()
-                        .map(|d| d.chars().take(10).collect::<String>())
+                        .map(|d| format_date(d))
                         .unwrap_or_else(|| "Done".to_string());
                     (date, styles::highlight_style())
                 }
                 Some(rank) => {
                     if let Some(pct) = rank.progress_percent() {
-                        (format!("{:>3}%", pct), styles::muted_style())
+                        (format!("{}%", pct), styles::muted_style())
                     } else {
-                        ("  -".to_string(), styles::muted_style())
+                        ("-".to_string(), styles::muted_style())
                     }
                 }
                 None => ("".to_string(), styles::muted_style()), // Crossover - no rank data
@@ -388,10 +395,14 @@ fn render_requirements_view(frame: &mut Frame, app: &App, area: Rect, focused: b
             if is_selected && req.is_completed() {
                 if let Some(ref date) = req.date_completed {
                     if !date.is_empty() {
+                        let formatted_date = chrono::NaiveDate::parse_from_str(&date[..10.min(date.len())], "%Y-%m-%d")
+                            .ok()
+                            .map(|d| d.format("%b %d, %Y").to_string())
+                            .unwrap_or_else(|| date.chars().take(10).collect());
                         lines.push(Line::from(vec![
                             Span::raw("          "),
                             Span::styled("Completed: ", styles::muted_style()),
-                            Span::styled(date.chars().take(10).collect::<String>(), styles::highlight_style()),
+                            Span::styled(formatted_date, styles::highlight_style()),
                         ]));
                     }
                 }

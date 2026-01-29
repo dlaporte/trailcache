@@ -1,6 +1,3 @@
-// Allow dead code: Infrastructure methods for future use
-#![allow(dead_code)]
-
 use std::path::PathBuf;
 
 use anyhow::{anyhow, Context, Result};
@@ -467,13 +464,17 @@ impl CacheManager {
 pub struct CacheAges {
     pub youth: Option<String>,
     pub adults: Option<String>,
+    #[allow(dead_code)]
     pub parents: Option<String>,
+    #[allow(dead_code)]
     pub patrols: Option<String>,
     pub events: Option<String>,
+    #[allow(dead_code)]
     pub advancement: Option<String>,
 }
 
 impl CacheAges {
+    #[allow(dead_code)]
     pub fn roster_age(&self) -> String {
         self.youth
             .clone()
@@ -481,6 +482,7 @@ impl CacheAges {
             .unwrap_or_else(|| "never".to_string())
     }
 
+    #[allow(dead_code)]
     pub fn events_age(&self) -> String {
         self.events.clone().unwrap_or_else(|| "never".to_string())
     }

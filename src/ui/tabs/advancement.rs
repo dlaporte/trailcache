@@ -1,4 +1,4 @@
-// Allow dead code: Helper methods for future advancement views
+// Only get_sorted_badges is currently used; other functions are infrastructure for future views
 #![allow(dead_code)]
 
 use ratatui::{
