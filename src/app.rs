@@ -427,10 +427,14 @@ impl App {
                 Config::default()
             }
         };
-        debug!(org_guid = ?config.organization_guid, "Config loaded");
+        info!(
+            org_guid = ?config.organization_guid,
+            offline_mode = config.offline_mode,
+            "Config loaded"
+        );
 
         let cache_dir = config.cache_dir().unwrap_or_else(|_| PathBuf::from("./cache"));
-        debug!(?cache_dir, "Cache directory configured");
+        info!(?cache_dir, "Cache directory");
 
         // Load session from disk if it exists
         let mut session = Session::new(cache_dir.clone());
