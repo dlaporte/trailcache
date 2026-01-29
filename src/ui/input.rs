@@ -87,6 +87,11 @@ pub async fn handle_input(app: &mut App, key: KeyEvent) -> Result<bool> {
     if matches!(app.state, AppState::ConfirmingQuit) {
         match key.code {
             KeyCode::Char('y') | KeyCode::Char('Y') | KeyCode::Enter => {
+                if app.caching_in_progress {
+                    app.status_message = Some("Cannot quit while caching in progress. Please wait...".to_string());
+                    app.state = AppState::Normal;
+                    return Ok(false);
+                }
                 app.state = AppState::Quitting;
                 return Ok(true);
             }
@@ -136,6 +141,10 @@ pub async fn handle_input(app: &mut App, key: KeyEvent) -> Result<bool> {
     // Global keys
     match key.code {
         KeyCode::Char('q') => {
+            if app.caching_in_progress {
+                app.status_message = Some("Cannot quit while caching in progress. Please wait...".to_string());
+                return Ok(false);
+            }
             app.state = AppState::ConfirmingQuit;
             return Ok(false);
         }
