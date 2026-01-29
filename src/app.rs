@@ -285,6 +285,10 @@ enum RefreshResult {
     Commissioners(Vec<Commissioner>),
     /// Signal that all refresh tasks have completed
     RefreshComplete,
+    /// Progress update for offline caching (current, total, description)
+    CachingProgress(usize, usize, String),
+    /// Offline caching is complete
+    CachingComplete,
     /// An error occurred during refresh
     Error(String),
 }
@@ -383,6 +387,12 @@ pub struct App {
     pub requirement_selection: usize,
     pub leadership_selection: usize,
 
+    // Track which requirements are currently being viewed (to prevent overwrites from background fetches)
+    viewing_rank_user_id: Option<i64>,
+    viewing_rank_id: Option<i64>,
+    viewing_badge_user_id: Option<i64>,
+    viewing_badge_id: Option<i64>,
+
     // Background task channel
     refresh_rx: Option<mpsc::Receiver<RefreshResult>>,
     refresh_tx: mpsc::Sender<RefreshResult>,
@@ -398,6 +408,12 @@ pub struct App {
 
     // Flag to trigger requirements fetch after main refresh completes
     pending_offline_requirements_fetch: bool,
+
+    // Offline caching progress tracking
+    pub caching_in_progress: bool,
+    pub caching_current: usize,
+    pub caching_total: usize,
+    pub caching_description: String,
 }
 
 impl App {
@@ -522,6 +538,11 @@ impl App {
             requirement_selection: 0,
             leadership_selection: 0,
 
+            viewing_rank_user_id: None,
+            viewing_rank_id: None,
+            viewing_badge_user_id: None,
+            viewing_badge_id: None,
+
             refresh_rx: Some(rx),
             refresh_tx: tx,
 
@@ -529,6 +550,11 @@ impl App {
             cache_ages: Default::default(),
             offline_mode,
             pending_offline_requirements_fetch: false,
+
+            caching_in_progress: false,
+            caching_current: 0,
+            caching_total: 0,
+            caching_description: String::new(),
         })
     }
 
@@ -839,15 +865,18 @@ impl App {
 
         let tx = self.refresh_tx.clone();
 
+        // Set caching in progress state
+        self.caching_in_progress = true;
+        self.caching_current = 0;
+        self.caching_total = 0;
+        self.caching_description = "Starting...".to_string();
+        self.status_message = Some("Caching data for offline mode: Starting...".to_string());
+
         tokio::spawn(async move {
-            Self::execute_background_refresh(tx, org_guid, token, user_id).await;
+            Self::execute_offline_caching(tx, org_guid, token, user_id).await;
         });
 
-        self.offline_mode = true;
-        self.config.offline_mode = true;
-        let _ = self.config.save();
         self.pending_offline_requirements_fetch = true;
-        self.status_message = Some("Caching data for offline mode...".to_string());
     }
 
     /// Exit offline mode - resume normal online operation.
@@ -986,6 +1015,170 @@ impl App {
         Self::send_result(&tx, RefreshResult::RefreshComplete).await;
     }
 
+    /// Execute offline caching with progress updates.
+    /// Similar to execute_background_refresh but sends CachingProgress updates.
+    async fn execute_offline_caching(
+        tx: mpsc::Sender<RefreshResult>,
+        org_guid: Arc<String>,
+        token: Arc<String>,
+        user_id: i64,
+    ) {
+        info!("Offline caching task started");
+
+        // Calculate total items to cache
+        // Base items: youth, adults, parents, patrols, events, dashboard, ready_to_award, key3, pin, profile, commissioners
+        let base_items = 11;
+
+        Self::send_result(&tx, RefreshResult::CachingProgress(0, base_items, "Fetching roster data...".to_string())).await;
+
+        // Create API client
+        let base_api = match ApiClient::new() {
+            Ok(api) => api,
+            Err(e) => {
+                error!(error = %e, "Failed to create API client for offline caching");
+                Self::send_result(&tx, RefreshResult::Error("Failed to create API client".to_string())).await;
+                return;
+            }
+        };
+
+        let api = base_api.with_token(Arc::clone(&token));
+        let mut completed = 0;
+
+        // Fetch youth
+        Self::send_result(&tx, RefreshResult::CachingProgress(completed, base_items, "Fetching scouts...".to_string())).await;
+        let youth_res = api.fetch_youth(&org_guid).await;
+        let youth_user_ids: Vec<i64> = youth_res
+            .as_ref()
+            .map(|list| list.iter().filter_map(|y| y.user_id).collect())
+            .unwrap_or_default();
+        Self::send_fetch_result(&tx, "Youth", youth_res, RefreshResult::Youth).await;
+        completed += 1;
+
+        // Fetch adults
+        Self::send_result(&tx, RefreshResult::CachingProgress(completed, base_items, "Fetching adults...".to_string())).await;
+        let adults_res = api.fetch_adults(&org_guid).await;
+        Self::send_fetch_result(&tx, "Adults", adults_res, RefreshResult::Adults).await;
+        completed += 1;
+
+        // Fetch parents
+        Self::send_result(&tx, RefreshResult::CachingProgress(completed, base_items, "Fetching parents...".to_string())).await;
+        let parents_res = api.fetch_parents(&org_guid).await;
+        Self::send_fetch_result_or_empty(&tx, "Parents", parents_res, RefreshResult::Parents, vec![]).await;
+        completed += 1;
+
+        // Fetch patrols
+        Self::send_result(&tx, RefreshResult::CachingProgress(completed, base_items, "Fetching patrols...".to_string())).await;
+        let patrols_res = api.fetch_patrols(&org_guid).await;
+        Self::send_fetch_result_or_empty(&tx, "Patrols", patrols_res, RefreshResult::Patrols, vec![]).await;
+        completed += 1;
+
+        // Fetch events
+        Self::send_result(&tx, RefreshResult::CachingProgress(completed, base_items, "Fetching events...".to_string())).await;
+        let events_res = api.fetch_events(user_id).await;
+        if let Ok(ref events) = events_res {
+            Self::send_result(&tx, RefreshResult::Events(events.clone())).await;
+        }
+        completed += 1;
+
+        // Fetch dashboard
+        Self::send_result(&tx, RefreshResult::CachingProgress(completed, base_items, "Fetching advancement dashboard...".to_string())).await;
+        let dashboard_res = api.fetch_advancement_dashboard(&org_guid).await;
+        Self::send_fetch_result_or_default(&tx, "Dashboard", dashboard_res, RefreshResult::AdvancementDashboard).await;
+        completed += 1;
+
+        // Fetch ready to award
+        Self::send_result(&tx, RefreshResult::CachingProgress(completed, base_items, "Fetching ready to award...".to_string())).await;
+        let ready_res = api.fetch_ready_to_award(&org_guid).await;
+        Self::send_fetch_result_or_empty(&tx, "ReadyToAward", ready_res, RefreshResult::ReadyToAward, vec![]).await;
+        completed += 1;
+
+        // Fetch key3
+        Self::send_result(&tx, RefreshResult::CachingProgress(completed, base_items, "Fetching unit leadership...".to_string())).await;
+        let key3_res = api.fetch_key3(&org_guid).await;
+        Self::send_key3_result(&tx, key3_res).await;
+        completed += 1;
+
+        // Fetch unit pin info
+        Self::send_result(&tx, RefreshResult::CachingProgress(completed, base_items, "Fetching unit info...".to_string())).await;
+        let pin_res = api.fetch_unit_pin(&org_guid).await;
+        Self::send_pin_result(&tx, pin_res).await;
+        completed += 1;
+
+        // Fetch org profile
+        Self::send_result(&tx, RefreshResult::CachingProgress(completed, base_items, "Fetching organization profile...".to_string())).await;
+        let profile_res = api.fetch_org_profile(&org_guid).await;
+        Self::send_profile_result(&tx, profile_res).await;
+        completed += 1;
+
+        // Fetch commissioners
+        Self::send_result(&tx, RefreshResult::CachingProgress(completed, base_items, "Fetching commissioners...".to_string())).await;
+        match api.fetch_commissioners(&org_guid).await {
+            Ok(commissioners) => {
+                Self::send_result(&tx, RefreshResult::Commissioners(commissioners)).await;
+            }
+            Err(e) => {
+                debug!(error = %e, "Failed to fetch commissioners");
+            }
+        }
+
+        // Now fetch per-youth data with progress
+        let total_youth = youth_user_ids.len();
+        if total_youth > 0 {
+            let per_youth_total = total_youth * 3; // ranks, badges, leadership for each youth
+            let mut per_youth_completed = 0;
+
+            Self::send_result(&tx, RefreshResult::CachingProgress(
+                per_youth_completed,
+                per_youth_total,
+                format!("Fetching advancement data for {} scouts...", total_youth)
+            )).await;
+
+            const MAX_CONCURRENT: usize = 5;
+            for chunk in youth_user_ids.chunks(MAX_CONCURRENT) {
+                let futures: Vec<_> = chunk
+                    .iter()
+                    .map(|&uid| {
+                        let api = api.clone();
+                        async move {
+                            let ranks = api.fetch_youth_ranks(uid).await.ok();
+                            let badges = api.fetch_youth_merit_badges(uid).await.ok();
+                            let leadership = api.fetch_youth_leadership(uid).await.ok();
+                            (uid, ranks, badges, leadership)
+                        }
+                    })
+                    .collect();
+
+                let results = futures::future::join_all(futures).await;
+                for (uid, ranks, badges, leadership) in results {
+                    if let Some(r) = ranks {
+                        Self::send_result(&tx, RefreshResult::YouthRanks(uid, r)).await;
+                    }
+                    per_youth_completed += 1;
+
+                    if let Some(b) = badges {
+                        Self::send_result(&tx, RefreshResult::YouthMeritBadges(uid, b)).await;
+                    }
+                    per_youth_completed += 1;
+
+                    if let Some(l) = leadership {
+                        Self::send_result(&tx, RefreshResult::YouthLeadership(uid, l)).await;
+                    }
+                    per_youth_completed += 1;
+
+                    let pct = (per_youth_completed * 100) / per_youth_total;
+                    Self::send_result(&tx, RefreshResult::CachingProgress(
+                        per_youth_completed,
+                        per_youth_total,
+                        format!("Caching scout data... {}%", pct)
+                    )).await;
+                }
+            }
+        }
+
+        info!("Offline caching complete");
+        Self::send_result(&tx, RefreshResult::CachingComplete).await;
+    }
+
     /// Fetch rank, merit badge, and leadership progress for all youth members.
     /// This populates all_youth_ranks and all_youth_badges HashMaps for the Ranks/Badges tabs,
     /// and caches leadership data for the Leadership tab.
@@ -1079,11 +1272,18 @@ impl App {
             }
         }
 
+        let total_reqs = rank_reqs_to_fetch.len() + badge_reqs_to_fetch.len();
+        let mut completed = 0;
+
         info!(
             rank_count = rank_reqs_to_fetch.len(),
             badge_count = badge_reqs_to_fetch.len(),
             "Fetching requirements for offline"
         );
+
+        Self::send_result(tx, RefreshResult::CachingProgress(
+            0, total_reqs, "Caching rank requirements...".to_string()
+        )).await;
 
         // Fetch rank requirements with limited concurrency
         const MAX_CONCURRENT: usize = 5;
@@ -1104,8 +1304,18 @@ impl App {
                 if let Some(reqs) = reqs {
                     Self::send_result(tx, RefreshResult::RankRequirements(user_id, rank_id, reqs)).await;
                 }
+                completed += 1;
             }
+
+            let pct = if total_reqs > 0 { (completed * 100) / total_reqs } else { 0 };
+            Self::send_result(tx, RefreshResult::CachingProgress(
+                completed, total_reqs, format!("Caching requirements... {}%", pct)
+            )).await;
         }
+
+        Self::send_result(tx, RefreshResult::CachingProgress(
+            completed, total_reqs, "Caching merit badge requirements...".to_string()
+        )).await;
 
         // Fetch badge requirements with limited concurrency
         for chunk in badge_reqs_to_fetch.chunks(MAX_CONCURRENT) {
@@ -1125,7 +1335,13 @@ impl App {
                 if let Some((reqs, version)) = result {
                     Self::send_result(tx, RefreshResult::BadgeRequirements(user_id, badge_id, reqs, version)).await;
                 }
+                completed += 1;
             }
+
+            let pct = if total_reqs > 0 { (completed * 100) / total_reqs } else { 0 };
+            Self::send_result(tx, RefreshResult::CachingProgress(
+                completed, total_reqs, format!("Caching requirements... {}%", pct)
+            )).await;
         }
 
         info!("All requirements fetching complete");
@@ -1481,19 +1697,25 @@ impl App {
                 if let Err(e) = self.cache.save_rank_requirements(user_id, rank_id, &data) {
                     warn!(error = %e, "Failed to cache rank requirements");
                 }
-                self.selected_rank_requirements = data;
-                self.viewing_requirements = true;
-                self.requirement_selection = 0;
+                // Only update selected view if this is the currently viewed rank
+                if self.viewing_rank_user_id == Some(user_id) && self.viewing_rank_id == Some(rank_id) {
+                    self.selected_rank_requirements = data;
+                    self.viewing_requirements = true;
+                    self.requirement_selection = 0;
+                }
             }
             RefreshResult::BadgeRequirements(user_id, badge_id, data, version) => {
                 // Cache the requirements
                 if let Err(e) = self.cache.save_badge_requirements(user_id, badge_id, &data, &version) {
                     warn!(error = %e, "Failed to cache badge requirements");
                 }
-                self.selected_badge_requirements = data;
-                self.selected_badge_version = version;
-                self.viewing_requirements = true;
-                self.requirement_selection = 0;
+                // Only update selected view if this is the currently viewed badge
+                if self.viewing_badge_user_id == Some(user_id) && self.viewing_badge_id == Some(badge_id) {
+                    self.selected_badge_requirements = data;
+                    self.selected_badge_version = version;
+                    self.viewing_requirements = true;
+                    self.requirement_selection = 0;
+                }
             }
             RefreshResult::RefreshComplete => {
                 // Check if we need to fetch all requirements for offline mode
@@ -1524,6 +1746,53 @@ impl App {
                             self.status_message = None;
                         }
                     }
+                }
+            }
+            RefreshResult::CachingProgress(current, total, description) => {
+                self.caching_current = current;
+                self.caching_total = total;
+                self.caching_description = description.clone();
+                let pct = if total > 0 { (current * 100) / total } else { 0 };
+                self.status_message = Some(format!("Caching: {} ({}%)", description, pct));
+            }
+            RefreshResult::CachingComplete => {
+                // Check if we still need to fetch detailed requirements
+                if self.pending_offline_requirements_fetch {
+                    self.pending_offline_requirements_fetch = false;
+                    self.status_message = Some("Caching detailed requirements for offline...".to_string());
+
+                    // Clone data needed for the async task
+                    let tx = self.refresh_tx.clone();
+                    let all_youth_ranks = self.all_youth_ranks.clone();
+                    let all_youth_badges = self.all_youth_badges.clone();
+                    let token = match self.session.token() {
+                        Some(t) => Arc::new(t.to_string()),
+                        None => {
+                            // No token - finish without requirements
+                            self.caching_in_progress = false;
+                            self.offline_mode = true;
+                            self.config.offline_mode = true;
+                            let _ = self.config.save();
+                            self.status_message = Some("Offline mode ready (no requirements cached)".to_string());
+                            return;
+                        }
+                    };
+
+                    tokio::spawn(async move {
+                        Self::fetch_all_requirements_for_offline(&tx, &all_youth_ranks, &all_youth_badges, &token).await;
+                        // Signal that requirements caching is done
+                        Self::send_result(&tx, RefreshResult::CachingComplete).await;
+                    });
+                } else {
+                    // All done - enable offline mode
+                    self.caching_in_progress = false;
+                    self.offline_mode = true;
+                    self.config.offline_mode = true;
+                    if let Err(e) = self.config.save() {
+                        warn!(error = %e, "Failed to save config after offline caching");
+                    }
+                    self.status_message = Some("Offline mode ready - all data cached".to_string());
+                    info!("Offline caching complete, offline mode enabled");
                 }
             }
             RefreshResult::Error(msg) => {
@@ -1769,6 +2038,10 @@ impl App {
             return;
         }
 
+        // Track which rank requirements we're viewing to prevent overwrites from background fetches
+        self.viewing_rank_user_id = Some(user_id);
+        self.viewing_rank_id = Some(rank_id);
+
         // In offline mode, use cached data only
         if self.offline_mode {
             if let Ok(Some(cached)) = self.cache.load_rank_requirements(user_id, rank_id) {
@@ -1809,6 +2082,10 @@ impl App {
             warn!(user_id, badge_id, "Invalid IDs for badge requirements fetch");
             return;
         }
+
+        // Track which badge requirements we're viewing to prevent overwrites from background fetches
+        self.viewing_badge_user_id = Some(user_id);
+        self.viewing_badge_id = Some(badge_id);
 
         // In offline mode, use cached data only
         if self.offline_mode {
