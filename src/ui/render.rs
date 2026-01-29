@@ -128,6 +128,7 @@ fn render_tabs(frame: &mut Frame, app: &App, area: Rect) {
             ("[d]etails", app.scout_detail_view == ScoutDetailView::Details),
             ("[r]anks", app.scout_detail_view == ScoutDetailView::Ranks),
             ("[m]erit badges", app.scout_detail_view == ScoutDetailView::MeritBadges),
+            ("[l]eadership", app.scout_detail_view == ScoutDetailView::Leadership),
         ]),
         Tab::Events => Some(vec![
             ("[d]etails", app.event_detail_view == EventDetailView::Details),
@@ -302,8 +303,8 @@ fn render_help_overlay(frame: &mut Frame, _app: &App) {
             Span::styled("Sort by name/rank/patrol/grade/age", styles::help_desc_style()),
         ]),
         Line::from(vec![
-            Span::styled("  d/r/m     ", styles::help_key_style()),
-            Span::styled("View details/ranks/merit badges", styles::help_desc_style()),
+            Span::styled("  d/r/m/l   ", styles::help_key_style()),
+            Span::styled("View details/ranks/merit badges/leadership", styles::help_desc_style()),
         ]),
         Line::from(""),
         Line::from(vec![

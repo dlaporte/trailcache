@@ -33,7 +33,7 @@ pub fn render(frame: &mut Frame, app: &App, area: Rect) {
         .constraints([Constraint::Percentage(50), Constraint::Percentage(50)])
         .split(main_chunks[1]);
 
-    render_rank_overview(frame, app, middle_chunks[0]);
+    render_positions(frame, app, middle_chunks[0]);
     render_patrols(frame, app, middle_chunks[1]);
 
     // Bottom row: Renewals | Training (50/50)
@@ -95,32 +95,79 @@ fn render_patrols(frame: &mut Frame, app: &App, area: Rect) {
     frame.render_widget(paragraph, area);
 }
 
-fn render_rank_overview(frame: &mut Frame, app: &App, area: Rect) {
+fn render_positions(frame: &mut Frame, app: &App, area: Rect) {
     let mut lines = vec![];
 
-    let rank_counts = calculate_rank_distribution(app);
-    let rank_order = ["Eagle", "Life", "Star", "First Class", "Second Class", "Tenderfoot", "Scout", "Crossover"];
+    // Collect all youth with positions of responsibility
+    // Tuple: (position_name, display_position (with patrol if applicable), holder_name)
+    let mut positions: Vec<(&str, String, String)> = Vec::new();
 
-    for rank in rank_order.iter() {
-        // Map "Crossover" display to "None" data
-        let data_rank = if *rank == "Crossover" { "None" } else { rank };
-        let count = rank_counts.get(data_rank).copied().unwrap_or(0);
-        if count > 0 {
+    for youth in &app.youth {
+        if let Some(ref pos) = youth.position {
+            // Skip "Scouts BSA" (just means member) and "Scout"
+            if !pos.is_empty() && pos != "Scouts BSA" && pos != "Scout" {
+                // For patrol leaders and assistant patrol leaders, include the patrol name
+                let display_pos = if (pos == "Patrol Leader" || pos == "Assistant Patrol Leader")
+                    && youth.patrol_name.as_ref().map(|p| !p.is_empty()).unwrap_or(false)
+                {
+                    format!("{} ({})", pos, youth.patrol_name.as_ref().unwrap())
+                } else {
+                    pos.clone()
+                };
+                positions.push((pos.as_str(), display_pos, youth.display_name()));
+            }
+        }
+    }
+
+    // Define position priority order (SPL first, then ASPL, then others alphabetically)
+    let priority_order = [
+        "Senior Patrol Leader",
+        "Assistant Senior Patrol Leader",
+        "Troop Guide",
+        "Patrol Leader",
+        "Assistant Patrol Leader",
+        "Quartermaster",
+        "Scribe",
+        "Historian",
+        "Librarian",
+        "Chaplain Aide",
+        "Outdoor Ethics Guide",
+        "Den Chief",
+        "Instructor",
+        "Junior Assistant Scoutmaster",
+        "Bugler",
+    ];
+
+    // Sort positions by priority order, then alphabetically by display position, then by holder name
+    positions.sort_by(|a, b| {
+        let a_priority = priority_order.iter().position(|&p| p == a.0).unwrap_or(999);
+        let b_priority = priority_order.iter().position(|&p| p == b.0).unwrap_or(999);
+
+        if a_priority != b_priority {
+            a_priority.cmp(&b_priority)
+        } else if a.1 != b.1 {
+            a.1.cmp(&b.1)
+        } else {
+            a.2.cmp(&b.2)
+        }
+    });
+
+    if positions.is_empty() {
+        lines.push(Line::from(Span::styled("No positions assigned", styles::muted_style())));
+    } else {
+        // Find the longest display position name for alignment
+        let max_pos_len = positions.iter().map(|(_, display, _)| display.len()).max().unwrap_or(0);
+
+        for (_, display_pos, holder) in &positions {
             lines.push(Line::from(vec![
-                Span::styled(format!("{:<14}", rank), styles::list_item_style()),
-                Span::raw(format!("{:>3}", count)),
+                Span::styled(format!("{:<width$}", display_pos, width = max_pos_len + 2), styles::list_item_style()),
+                Span::styled(holder, styles::highlight_style()),
             ]));
         }
     }
 
-    lines.push(Line::from(""));
-    lines.push(Line::from(vec![
-        Span::styled("Total:        ", styles::muted_style()),
-        Span::raw(format!("{:>3}", app.youth.len())),
-    ]));
-
     let block = Block::default()
-        .title(" Ranks ")
+        .title(" Positions ")
         .title_style(styles::title_style())
         .borders(Borders::ALL)
         .border_style(styles::border_style(false));
@@ -506,24 +553,6 @@ fn get_patrol_rank_breakdown(app: &App) -> HashMap<String, (usize, HashMap<Strin
     }
 
     result
-}
-
-fn calculate_rank_distribution(app: &App) -> HashMap<&'static str, usize> {
-    let mut counts: HashMap<&'static str, usize> = HashMap::new();
-
-    for youth in &app.youth {
-        // Use ScoutRank enum for consistent rank parsing
-        let scout_rank = ScoutRank::from_str(youth.current_rank.as_deref());
-        // Map "Crossover" back to "None" for data consistency
-        let rank = if scout_rank == ScoutRank::Unknown {
-            "None"
-        } else {
-            scout_rank.display_name()
-        };
-        *counts.entry(rank).or_insert(0) += 1;
-    }
-
-    counts
 }
 
 struct TrainingStats {

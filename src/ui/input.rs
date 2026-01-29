@@ -30,12 +30,14 @@ async fn cycle_scout_detail_view(app: &mut App, direction: CycleDirection) {
         CycleDirection::Forward => match app.scout_detail_view {
             ScoutDetailView::Details => ScoutDetailView::Ranks,
             ScoutDetailView::Ranks => ScoutDetailView::MeritBadges,
-            ScoutDetailView::MeritBadges => ScoutDetailView::Details,
+            ScoutDetailView::MeritBadges => ScoutDetailView::Leadership,
+            ScoutDetailView::Leadership => ScoutDetailView::Details,
         },
         CycleDirection::Backward => match app.scout_detail_view {
-            ScoutDetailView::Details => ScoutDetailView::MeritBadges,
+            ScoutDetailView::Details => ScoutDetailView::Leadership,
             ScoutDetailView::Ranks => ScoutDetailView::Details,
             ScoutDetailView::MeritBadges => ScoutDetailView::Ranks,
+            ScoutDetailView::Leadership => ScoutDetailView::MeritBadges,
         },
     };
 
@@ -44,17 +46,24 @@ async fn cycle_scout_detail_view(app: &mut App, direction: CycleDirection) {
     app.advancement_view = match new_view {
         ScoutDetailView::Ranks => AdvancementView::Ranks,
         ScoutDetailView::MeritBadges => AdvancementView::MeritBadges,
-        ScoutDetailView::Details => app.advancement_view, // unchanged
+        ScoutDetailView::Details | ScoutDetailView::Leadership => app.advancement_view, // unchanged
     };
     app.viewing_requirements = false;
-    // Reset selection when switching views
-    app.advancement_rank_selection = 0;
+    // Reset selection when switching views (ranks start at top/Eagle since reversed)
+    app.advancement_rank_selection = app.selected_youth_ranks.len().saturating_sub(1);
     app.advancement_badge_selection = 0;
+    app.leadership_selection = 0;
 
-    // Load data if switching to Ranks or MeritBadges
-    if matches!(new_view, ScoutDetailView::Ranks | ScoutDetailView::MeritBadges) {
-        if let Some(uid) = user_id {
-            app.fetch_youth_progress(uid).await;
+    // Load data if switching to data views
+    if let Some(uid) = user_id {
+        match new_view {
+            ScoutDetailView::Ranks | ScoutDetailView::MeritBadges => {
+                app.fetch_youth_progress(uid).await;
+            }
+            ScoutDetailView::Leadership => {
+                app.fetch_youth_leadership(uid).await;
+            }
+            ScoutDetailView::Details => {}
         }
     }
 }
@@ -231,7 +240,7 @@ pub async fn handle_input(app: &mut App, key: KeyEvent) -> Result<bool> {
                 app.selected_badge_requirements.clear();
                 app.requirement_selection = 0;
             } else if app.current_tab == Tab::Scouts && app.scout_detail_view != ScoutDetailView::Details {
-                // Go back to details view from Ranks/MeritBadges
+                // Go back to details view from Ranks/MeritBadges/Leadership
                 app.scout_detail_view = ScoutDetailView::Details;
                 app.focus = Focus::List;
             } else if app.current_tab == Tab::Events && app.event_detail_view == EventDetailView::Rsvp {
@@ -414,7 +423,8 @@ async fn handle_scouts_input(app: &mut App, key: KeyEvent) -> Result<()> {
                 app.viewing_requirements = false;
                 app.selected_rank_requirements.clear();
                 app.selected_badge_requirements.clear();
-                app.advancement_rank_selection = 0;
+                // Start at top (Eagle) since display is reversed
+                app.advancement_rank_selection = app.selected_youth_ranks.len().saturating_sub(1);
                 // Always load progress (will use cache if available)
                 if let Some(uid) = user_id {
                     app.fetch_youth_progress(uid).await;
@@ -422,6 +432,22 @@ async fn handle_scouts_input(app: &mut App, key: KeyEvent) -> Result<()> {
             } else {
                 // Sort by rank
                 app.toggle_scout_sort(ScoutSortColumn::Rank);
+            }
+            return Ok(());
+        }
+        KeyCode::Char('l') => {
+            // Switch to Leadership view
+            let user_id = app.get_sorted_youth()
+                .get(app.roster_selection)
+                .and_then(|y| y.user_id);
+
+            app.scout_detail_view = ScoutDetailView::Leadership;
+            app.focus = Focus::Detail;
+            app.viewing_requirements = false;
+            app.leadership_selection = 0;
+            // Load leadership data
+            if let Some(uid) = user_id {
+                app.fetch_youth_leadership(uid).await;
             }
             return Ok(());
         }
@@ -442,15 +468,18 @@ async fn handle_scouts_input(app: &mut App, key: KeyEvent) -> Result<()> {
                 }.saturating_sub(1);
                 app.requirement_selection = (app.requirement_selection + 1).min(max);
             } else if app.focus == Focus::Detail {
-                // Navigate through ranks/badges
+                // Navigate through ranks/badges/leadership
                 match app.scout_detail_view {
                     ScoutDetailView::Ranks => {
-                        let max = app.selected_youth_ranks.len().saturating_sub(1);
-                        app.advancement_rank_selection = (app.advancement_rank_selection + 1).min(max);
+                        // Reversed display order, so down = decrement
+                        app.advancement_rank_selection = app.advancement_rank_selection.saturating_sub(1);
                     }
                     ScoutDetailView::MeritBadges => {
                         let max = app.selected_youth_badges.len().saturating_sub(1);
                         app.advancement_badge_selection = (app.advancement_badge_selection + 1).min(max);
+                    }
+                    ScoutDetailView::Leadership => {
+                        // Leadership view is not navigable
                     }
                     _ => {}
                 }
@@ -462,11 +491,13 @@ async fn handle_scouts_input(app: &mut App, key: KeyEvent) -> Result<()> {
                     // Clear progress data when changing scout
                     app.selected_youth_ranks.clear();
                     app.selected_youth_badges.clear();
+                    app.selected_youth_leadership.clear();
                     app.selected_rank_requirements.clear();
                     app.selected_badge_requirements.clear();
                     app.viewing_requirements = false;
-                    app.advancement_rank_selection = 0;
+                    app.advancement_rank_selection = app.selected_youth_ranks.len().saturating_sub(1);
                     app.advancement_badge_selection = 0;
+                    app.leadership_selection = 0;
                 }
             }
         }
@@ -476,10 +507,15 @@ async fn handle_scouts_input(app: &mut App, key: KeyEvent) -> Result<()> {
             } else if app.focus == Focus::Detail {
                 match app.scout_detail_view {
                     ScoutDetailView::Ranks => {
-                        app.advancement_rank_selection = app.advancement_rank_selection.saturating_sub(1);
+                        // Reversed display order, so up = increment
+                        let max = app.selected_youth_ranks.len().saturating_sub(1);
+                        app.advancement_rank_selection = (app.advancement_rank_selection + 1).min(max);
                     }
                     ScoutDetailView::MeritBadges => {
                         app.advancement_badge_selection = app.advancement_badge_selection.saturating_sub(1);
+                    }
+                    ScoutDetailView::Leadership => {
+                        // Leadership view is not navigable
                     }
                     _ => {}
                 }
@@ -489,11 +525,13 @@ async fn handle_scouts_input(app: &mut App, key: KeyEvent) -> Result<()> {
                 if old_selection != app.roster_selection {
                     app.selected_youth_ranks.clear();
                     app.selected_youth_badges.clear();
+                    app.selected_youth_leadership.clear();
                     app.selected_rank_requirements.clear();
                     app.selected_badge_requirements.clear();
                     app.viewing_requirements = false;
-                    app.advancement_rank_selection = 0;
+                    app.advancement_rank_selection = app.selected_youth_ranks.len().saturating_sub(1);
                     app.advancement_badge_selection = 0;
+                    app.leadership_selection = 0;
                 }
             }
         }
@@ -502,6 +540,7 @@ async fn handle_scouts_input(app: &mut App, key: KeyEvent) -> Result<()> {
                 app.roster_selection = 0;
                 app.selected_youth_ranks.clear();
                 app.selected_youth_badges.clear();
+                app.selected_youth_leadership.clear();
             }
         }
         KeyCode::End => {
@@ -509,6 +548,7 @@ async fn handle_scouts_input(app: &mut App, key: KeyEvent) -> Result<()> {
                 app.roster_selection = max_index;
                 app.selected_youth_ranks.clear();
                 app.selected_youth_badges.clear();
+                app.selected_youth_leadership.clear();
             }
         }
         KeyCode::PageDown => {
@@ -516,6 +556,7 @@ async fn handle_scouts_input(app: &mut App, key: KeyEvent) -> Result<()> {
                 app.roster_selection = (app.roster_selection + PAGE_SCROLL_SIZE).min(max_index);
                 app.selected_youth_ranks.clear();
                 app.selected_youth_badges.clear();
+                app.selected_youth_leadership.clear();
             }
         }
         KeyCode::PageUp => {
@@ -523,6 +564,7 @@ async fn handle_scouts_input(app: &mut App, key: KeyEvent) -> Result<()> {
                 app.roster_selection = app.roster_selection.saturating_sub(PAGE_SCROLL_SIZE);
                 app.selected_youth_ranks.clear();
                 app.selected_youth_badges.clear();
+                app.selected_youth_leadership.clear();
             }
         }
         KeyCode::Enter => {
@@ -562,7 +604,7 @@ async fn handle_scouts_input(app: &mut App, key: KeyEvent) -> Result<()> {
                                     }
                                 }
                             }
-                            ScoutDetailView::Details => {}
+                            ScoutDetailView::Details | ScoutDetailView::Leadership => {}
                         }
                     }
                 }

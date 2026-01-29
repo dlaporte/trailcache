@@ -109,6 +109,7 @@ fn render_scout_detail(frame: &mut Frame, app: &App, area: Rect) {
         ScoutDetailView::Details => render_details_view(frame, app, selected, area, focused),
         ScoutDetailView::Ranks => render_ranks_view(frame, app, selected, area, focused),
         ScoutDetailView::MeritBadges => render_badges_view(frame, app, selected, area, focused),
+        ScoutDetailView::Leadership => render_leadership_view(frame, app, selected, area, focused),
     }
 }
 
@@ -121,6 +122,13 @@ fn render_details_view(frame: &mut Frame, app: &App, selected: Option<&&crate::m
 
             // Name header (display_name already includes nickname if different from first name)
             lines.push(Line::from(Span::styled(youth.display_name(), styles::title_style())));
+
+            // BSA ID right under name
+            let bsa_id = youth.member_id.clone().unwrap_or_else(|| placeholder.to_string());
+            lines.push(Line::from(vec![
+                Span::styled("BSA ID: ", styles::muted_style()),
+                Span::styled(bsa_id, styles::highlight_style()),
+            ]));
 
             lines.push(Line::from(""));
 
@@ -163,12 +171,6 @@ fn render_details_view(frame: &mut Frame, app: &App, selected: Option<&&crate::m
                     }
                 }
             }
-
-            let bsa_id = youth.member_id.clone().unwrap_or_else(|| placeholder.to_string());
-            lines.push(Line::from(vec![
-                Span::styled("BSA ID:     ", styles::muted_style()),
-                Span::raw(bsa_id),
-            ]));
 
             lines.push(Line::from(""));
 
@@ -346,23 +348,40 @@ fn render_ranks_view(frame: &mut Frame, app: &App, selected: Option<&&crate::mod
                 lines.push(Line::from(Span::styled("Rank Progress (Enter to view requirements)", styles::highlight_style())));
                 lines.push(Line::from(""));
 
-                for (i, rank) in app.selected_youth_ranks.iter().enumerate() {
-                    let is_selected = i == app.advancement_rank_selection && focused;
-                    let prefix = if is_selected { "> " } else { "  " };
+                let ranks_len = app.selected_youth_ranks.len();
+                for (i, rank) in app.selected_youth_ranks.iter().rev().enumerate() {
+                    // Map reversed display index to original index for selection
+                    let original_idx = ranks_len.saturating_sub(1).saturating_sub(i);
+                    let is_selected = original_idx == app.advancement_rank_selection && focused;
+
+                    // Format date helper
+                    let format_date = |d: &str| -> String {
+                        chrono::NaiveDate::parse_from_str(&d[..10.min(d.len())], "%Y-%m-%d")
+                            .ok()
+                            .map(|parsed| parsed.format("%b %d, %Y").to_string())
+                            .unwrap_or_else(|| d.chars().take(10).collect())
+                    };
 
                     let (status_text, status_style) = if rank.is_awarded() {
-                        ("Awarded", styles::success_style())
+                        // Show awarded date in green
+                        let date = rank.date_awarded.as_ref()
+                            .map(|d| format_date(d))
+                            .unwrap_or_else(|| "Awarded".to_string());
+                        (date, styles::success_style())
                     } else if rank.is_completed() {
-                        ("Complete", styles::highlight_style())
+                        // Show completed date in yellow
+                        let date = rank.date_completed.as_ref()
+                            .map(|d| format_date(d))
+                            .unwrap_or_else(|| "Complete".to_string());
+                        (date, styles::highlight_style())
                     } else if let Some(pct) = rank.progress_percent() {
                         if pct > 0 {
-                            let text = format!("{}%", pct);
-                            (text.leak() as &str, styles::muted_style())
+                            (format!("{}%", pct), styles::highlight_style())
                         } else {
-                            (placeholder, styles::muted_style())
+                            (placeholder.to_string(), styles::muted_style())
                         }
                     } else {
-                        (placeholder, styles::muted_style())
+                        (placeholder.to_string(), styles::muted_style())
                     };
 
                     let rank_style = if is_selected {
@@ -372,28 +391,9 @@ fn render_ranks_view(frame: &mut Frame, app: &App, selected: Option<&&crate::mod
                     };
 
                     lines.push(Line::from(vec![
-                        Span::raw(prefix),
                         Span::styled(format!("{:<15}", rank.rank_name), rank_style),
                         Span::styled(format!(" {}", status_text), status_style),
                     ]));
-
-                    // Show date if completed/awarded
-                    if is_selected {
-                        if let Some(ref date) = rank.date_completed {
-                            lines.push(Line::from(vec![
-                                Span::raw("    "),
-                                Span::styled("Completed:  ", styles::muted_style()),
-                                Span::raw(date.chars().take(10).collect::<String>()),
-                            ]));
-                        }
-                        if let Some(ref date) = rank.date_awarded {
-                            lines.push(Line::from(vec![
-                                Span::raw("    "),
-                                Span::styled("Awarded:    ", styles::muted_style()),
-                                Span::raw(date.chars().take(10).collect::<String>()),
-                            ]));
-                        }
-                    }
                 }
             }
 
@@ -460,12 +460,9 @@ fn render_rank_requirements_view(frame: &mut Frame, app: &App, selected: Option<
             // Pad to full width to clear any artifacts from previous renders
             let req_text_padded = format!("{:<width$}", req_text, width = text_width);
 
-            // Highlight selected requirement
-            let prefix = if is_selected { "▶ " } else { "  " };
             let text_style = if is_selected { styles::selected_style() } else { styles::list_item_style() };
 
             lines.push(Line::from(vec![
-                Span::raw(prefix),
                 Span::styled(check, check_style),
                 Span::raw(" "),
                 Span::styled(format!("{:<5}", req_num), styles::highlight_style()),
@@ -543,29 +540,31 @@ fn render_badges_view(frame: &mut Frame, app: &App, selected: Option<&&crate::mo
 
                 for (display_idx, badge) in sorted_badges.iter().enumerate() {
                     let is_selected = display_idx == app.advancement_badge_selection && focused;
-                    let prefix = if is_selected { "▶ " } else { "  " };
 
                     let eagle_marker = if badge.is_eagle_required.unwrap_or(false) { "*" } else { " " };
 
                     let (status_text, status_style) = if badge.is_completed() {
                         let date = badge.date_completed.as_ref()
-                            .map(|d| d.chars().take(10).collect::<String>())
+                            .and_then(|d| {
+                                chrono::NaiveDate::parse_from_str(&d[..10.min(d.len())], "%Y-%m-%d")
+                                    .ok()
+                                    .map(|parsed| parsed.format("%b %d, %Y").to_string())
+                            })
                             .unwrap_or_else(|| "Done".to_string());
                         (date, styles::success_style())
                     } else if let Some(pct) = badge.progress_percent() {
-                        (format!("{:>3}%", pct), styles::highlight_style())
+                        (format!("{}%", pct), styles::highlight_style())
                     } else {
-                        ("  -".to_string(), styles::muted_style())
+                        ("-".to_string(), styles::muted_style())
                     };
 
                     let name_style = if is_selected { styles::selected_style() } else { styles::list_item_style() };
 
                     lines.push(Line::from(vec![
-                        Span::raw(prefix),
                         Span::styled(eagle_marker, styles::highlight_style()),
                         Span::raw(" "),
-                        Span::styled(format!("{:<30}", truncate(&badge.name, 30)), name_style),
-                        Span::styled(status_text, status_style),
+                        Span::styled(format!("{:<29}", truncate(&badge.name, 29)), name_style),
+                        Span::styled(format!(" {}", status_text), status_style),
                     ]));
                 }
             }
@@ -632,35 +631,44 @@ fn render_badge_requirements_view(frame: &mut Frame, app: &App, selected: Option
         for (i, req) in app.selected_badge_requirements.iter().enumerate() {
             let is_selected = i == app.requirement_selection;
             let check = if req.is_completed() { "✓" } else { "○" };
-            let check_style = if req.is_completed() { styles::success_style() } else { styles::muted_style() };
+            let check_style = if is_selected {
+                styles::selected_style()
+            } else if req.is_completed() {
+                styles::success_style()
+            } else {
+                styles::muted_style()
+            };
 
             let req_num = req.number();
             // Summarize to first sentence and truncate
             let raw_text = req.text();
             let summary = summarize_requirement(&raw_text);
-            let req_text = truncate(&summary, text_width.min(45));
+            let req_text = truncate(&summary, text_width);
             // Pad to full width to clear any artifacts from previous renders
             let req_text_padded = format!("{:<width$}", req_text, width = text_width);
 
-            let prefix = if is_selected { "▶ " } else { "  " };
-            let text_style = if is_selected { styles::selected_style() } else { styles::list_item_style() };
+            let row_style = if is_selected { styles::selected_style() } else { styles::list_item_style() };
+            let num_style = if is_selected { styles::selected_style() } else { styles::highlight_style() };
 
             lines.push(Line::from(vec![
-                Span::raw(prefix),
                 Span::styled(check, check_style),
-                Span::raw(" "),
-                Span::styled(format!("{:<5}", req_num), styles::highlight_style()),
-                Span::styled(req_text_padded, text_style),
+                Span::styled(" ", row_style),
+                Span::styled(format!("{:<5}", req_num), num_style),
+                Span::styled(req_text_padded, row_style),
             ]));
 
             // Show completion date if completed and selected
             if is_selected && req.is_completed() {
                 if let Some(ref date) = req.date_completed {
                     if !date.is_empty() {
+                        let formatted_date = chrono::NaiveDate::parse_from_str(&date[..10.min(date.len())], "%Y-%m-%d")
+                            .ok()
+                            .map(|d| d.format("%b %d, %Y").to_string())
+                            .unwrap_or_else(|| date.chars().take(10).collect());
                         lines.push(Line::from(vec![
-                            Span::raw("          "),
+                            Span::raw("        "),
                             Span::styled("Completed: ", styles::muted_style()),
-                            Span::styled(format!("{:<width$}", date.chars().take(10).collect::<String>(), width = text_width.saturating_sub(10)), styles::highlight_style()),
+                            Span::styled(formatted_date, styles::highlight_style()),
                         ]));
                     }
                 }
@@ -806,6 +814,14 @@ fn render_adult_detail(frame: &mut Frame, app: &App, area: Rect) {
                 adult.display_name_full(),
                 styles::title_style(),
             )));
+
+            // BSA ID right under name
+            let bsa_id = adult.member_id.as_deref().unwrap_or("-");
+            lines.push(Line::from(vec![
+                Span::styled("BSA ID: ", styles::muted_style()),
+                Span::styled(bsa_id, styles::highlight_style()),
+            ]));
+
             lines.push(Line::from(""));
 
             // Unit Info section
@@ -836,12 +852,6 @@ fn render_adult_detail(frame: &mut Frame, app: &App, area: Rect) {
                     }
                 }
             }
-
-            let bsa_id = adult.member_id.as_deref().unwrap_or("-");
-            lines.push(Line::from(vec![
-                Span::styled("BSA ID:     ", styles::muted_style()),
-                Span::raw(bsa_id),
-            ]));
 
             lines.push(Line::from(""));
 
@@ -935,6 +945,91 @@ fn render_adult_detail(frame: &mut Frame, app: &App, area: Rect) {
     let block = Block::default()
         .borders(Borders::ALL)
         .border_style(styles::border_style(false));
+
+    let paragraph = Paragraph::new(content).block(block);
+    frame.render_widget(paragraph, area);
+}
+
+fn render_leadership_view(frame: &mut Frame, app: &App, selected: Option<&&crate::models::Youth>, area: Rect, focused: bool) {
+    let content = match selected {
+        Some(youth) => {
+            let mut lines = vec![];
+
+            // Scout name header
+            lines.push(Line::from(Span::styled(
+                youth.display_name(),
+                styles::title_style(),
+            )));
+
+            // Current position
+            let current_position = app.selected_youth_leadership
+                .iter()
+                .find(|p| p.is_current())
+                .map(|p| p.name().to_string())
+                .unwrap_or_else(|| "None".to_string());
+            lines.push(Line::from(vec![
+                Span::styled("Current Position: ", styles::muted_style()),
+                Span::styled(current_position, styles::highlight_style()),
+            ]));
+
+            lines.push(Line::from(""));
+
+            if app.selected_youth_leadership.is_empty() {
+                lines.push(Line::from(Span::styled(
+                    "Loading leadership history...",
+                    styles::muted_style(),
+                )));
+            } else {
+                lines.push(Line::from(Span::styled("Leadership History", styles::highlight_style())));
+                lines.push(Line::from(""));
+
+                for position in app.selected_youth_leadership.iter() {
+                    // Current position: yellow with indicator; past positions: green
+                    let (position_text, style) = if position.is_current() {
+                        (format!("{} (Current Position)", position.name()), styles::highlight_style())
+                    } else {
+                        (position.name().to_string(), styles::success_style())
+                    };
+
+                    lines.push(Line::from(Span::styled(position_text, style)));
+
+                    // Show patrol if this was a patrol position
+                    if let Some(ref patrol) = position.patrol {
+                        lines.push(Line::from(vec![
+                            Span::raw("  "),
+                            Span::styled("Patrol:  ", styles::muted_style()),
+                            Span::styled(patrol, styles::list_item_style()),
+                        ]));
+                    }
+
+                    // Show date range and days
+                    let days = position.days_display();
+                    let date_info = if days.is_empty() {
+                        position.date_range()
+                    } else {
+                        format!("{} ({})", position.date_range(), days)
+                    };
+                    lines.push(Line::from(vec![
+                        Span::raw("  "),
+                        Span::styled("Dates:   ", styles::muted_style()),
+                        Span::styled(date_info, styles::list_item_style()),
+                    ]));
+
+                    lines.push(Line::from(""));
+                }
+            }
+
+            lines
+        }
+        None => vec![Line::from(Span::styled(
+            "Select a scout from the list",
+            styles::muted_style(),
+        ))],
+    };
+
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_style(styles::border_style(focused));
 
     let paragraph = Paragraph::new(content).block(block);
     frame.render_widget(paragraph, area);

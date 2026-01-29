@@ -16,9 +16,9 @@ pub mod person;
 pub mod unit;
 
 pub use advancement::{
-    AdvancementDashboard, MeritBadgeCatalogEntry, MeritBadgeProgress, MeritBadgeRequirement,
-    MeritBadgeWithRequirements, RankProgress, RankRequirement, RankWithRequirements, RanksResponse,
-    ReadyToAward,
+    AdvancementDashboard, LeadershipPosition, MeritBadgeCatalogEntry, MeritBadgeProgress,
+    MeritBadgeRequirement, MeritBadgeWithRequirements, RankProgress, RankRequirement,
+    RankWithRequirements, RanksResponse, ReadyToAward,
 };
 pub use event::{Event, EventGuest, EventSortColumn, RsvpStatus};
 pub use organization::Patrol;

@@ -12,11 +12,11 @@ use chacha20poly1305::{
 use chrono::{DateTime, Utc};
 use rand::RngCore;
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
-use tracing::{debug, warn};
+use tracing::debug;
 
 use crate::models::{
-    Adult, AdvancementDashboard, Commissioner, Event, Key3Leaders, MeritBadgeProgress,
-    OrgProfile, Parent, Patrol, RankProgress, ReadyToAward, UnitInfo, Youth,
+    Adult, AdvancementDashboard, Commissioner, Event, Key3Leaders, LeadershipPosition,
+    MeritBadgeProgress, OrgProfile, Parent, Patrol, RankProgress, ReadyToAward, UnitInfo, Youth,
 };
 
 // Encryption constants
@@ -201,8 +201,9 @@ impl CacheManager {
         let plaintext = match decrypt_data(&ciphertext, &self.encryption_key) {
             Ok(p) => p,
             Err(e) => {
-                // Decryption failed - treat as cache miss
-                warn!(cache = name, error = %e, "Decryption failed, treating as cache miss");
+                // Decryption failed (likely key changed) - delete bad file and treat as cache miss
+                debug!(cache = name, error = %e, "Decryption failed, removing stale cache file");
+                let _ = std::fs::remove_file(&path);
                 return Ok(None);
             }
         };
@@ -315,6 +316,21 @@ impl CacheManager {
         badges: &[MeritBadgeProgress],
     ) -> Result<()> {
         self.save(&format!("merit_badges_{}", user_id), &badges)
+    }
+
+    pub fn load_youth_leadership(
+        &self,
+        user_id: i64,
+    ) -> Result<Option<CachedData<Vec<LeadershipPosition>>>> {
+        self.load(&format!("leadership_{}", user_id))
+    }
+
+    pub fn save_youth_leadership(
+        &self,
+        user_id: i64,
+        positions: &[LeadershipPosition],
+    ) -> Result<()> {
+        self.save(&format!("leadership_{}", user_id), &positions)
     }
 
     // ===== Unit Info =====

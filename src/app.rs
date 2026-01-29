@@ -20,8 +20,8 @@ use crate::config::Config;
 
 use crate::models::{
     Adult, AdvancementDashboard, Commissioner, Event, EventGuest, EventSortColumn,
-    Key3Leaders, MeritBadgeProgress, MeritBadgeRequirement, OrgProfile, Parent, Patrol,
-    RankProgress, RankRequirement, ReadyToAward, ScoutSortColumn, UnitInfo, Youth,
+    Key3Leaders, LeadershipPosition, MeritBadgeProgress, MeritBadgeRequirement, OrgProfile,
+    Parent, Patrol, RankProgress, RankRequirement, ReadyToAward, ScoutSortColumn, UnitInfo, Youth,
 };
 use crate::utils::{cmp_ignore_case, contains_ignore_case};
 
@@ -179,6 +179,7 @@ pub enum ScoutDetailView {
     Details,
     Ranks,
     MeritBadges,
+    Leadership,
 }
 
 /// Sub-view for event detail panel
@@ -256,6 +257,8 @@ enum RefreshResult {
     YouthRanks(i64, Vec<RankProgress>),
     /// Merit badge progress for a specific youth (user_id, badges)
     YouthMeritBadges(i64, Vec<MeritBadgeProgress>),
+    /// Leadership position history for a specific youth (user_id, positions)
+    YouthLeadership(i64, Vec<LeadershipPosition>),
     /// Requirements for a specific rank (user_id, rank_id, requirements)
     RankRequirements(i64, i64, Vec<RankRequirement>),
     /// Requirements for a specific merit badge (user_id, badge_id, requirements, version)
@@ -360,11 +363,13 @@ pub struct App {
     // Individual youth data
     pub selected_youth_ranks: Vec<RankProgress>,
     pub selected_youth_badges: Vec<MeritBadgeProgress>,
+    pub selected_youth_leadership: Vec<LeadershipPosition>,
     pub selected_rank_requirements: Vec<RankRequirement>,
     pub selected_badge_requirements: Vec<MeritBadgeRequirement>,
     pub selected_badge_version: Option<String>,
     pub viewing_requirements: bool,
     pub requirement_selection: usize,
+    pub leadership_selection: usize,
 
     // Background task channel
     refresh_rx: Option<mpsc::Receiver<RefreshResult>>,
@@ -497,11 +502,13 @@ impl App {
 
             selected_youth_ranks: Vec::new(),
             selected_youth_badges: Vec::new(),
+            selected_youth_leadership: Vec::new(),
             selected_rank_requirements: Vec::new(),
             selected_badge_requirements: Vec::new(),
             selected_badge_version: None,
             viewing_requirements: false,
             requirement_selection: 0,
+            leadership_selection: 0,
 
             refresh_rx: Some(rx),
             refresh_tx: tx,
@@ -967,8 +974,9 @@ impl App {
         Self::send_result(&tx, RefreshResult::RefreshComplete).await;
     }
 
-    /// Fetch rank and merit badge progress for all youth members.
-    /// This populates all_youth_ranks and all_youth_badges HashMaps for the Ranks/Badges tabs.
+    /// Fetch rank, merit badge, and leadership progress for all youth members.
+    /// This populates all_youth_ranks and all_youth_badges HashMaps for the Ranks/Badges tabs,
+    /// and caches leadership data for the Leadership tab.
     async fn handle_all_youth_advancement_refresh(
         tx: &mpsc::Sender<RefreshResult>,
         user_ids: &[i64],
@@ -978,7 +986,7 @@ impl App {
             return;
         }
 
-        debug!(count = user_ids.len(), "Fetching ranks and badges for all youth");
+        debug!(count = user_ids.len(), "Fetching ranks, badges, and leadership for all youth");
 
         // Create API client with Arc-wrapped token (cheap clone)
         let api = match ApiClient::new() {
@@ -992,7 +1000,7 @@ impl App {
             }
         };
 
-        // Fetch ranks and badges for all youth with limited concurrency
+        // Fetch ranks, badges, and leadership for all youth with limited concurrency
         const MAX_CONCURRENT: usize = 5;
         for chunk in user_ids.chunks(MAX_CONCURRENT) {
             let futures: Vec<_> = chunk
@@ -1002,18 +1010,22 @@ impl App {
                     async move {
                         let ranks = api.fetch_youth_ranks(user_id).await.ok();
                         let badges = api.fetch_youth_merit_badges(user_id).await.ok();
-                        (user_id, ranks, badges)
+                        let leadership = api.fetch_youth_leadership(user_id).await.ok();
+                        (user_id, ranks, badges, leadership)
                     }
                 })
                 .collect();
 
             let results = futures::future::join_all(futures).await;
-            for (user_id, ranks, badges) in results {
+            for (user_id, ranks, badges, leadership) in results {
                 if let Some(ranks) = ranks {
                     Self::send_result(tx, RefreshResult::YouthRanks(user_id, ranks)).await;
                 }
                 if let Some(badges) = badges {
                     Self::send_result(tx, RefreshResult::YouthMeritBadges(user_id, badges)).await;
+                }
+                if let Some(leadership) = leadership {
+                    Self::send_result(tx, RefreshResult::YouthLeadership(user_id, leadership)).await;
                 }
             }
         }
@@ -1412,7 +1424,13 @@ impl App {
                 }
                 // Store in all_youth_ranks for the Ranks tab aggregate view
                 self.all_youth_ranks.insert(user_id, data.clone());
-                self.selected_youth_ranks = data;
+                // Only update selected view if this is the currently selected scout
+                let selected_user_id = self.get_sorted_youth()
+                    .get(self.roster_selection)
+                    .and_then(|y| y.user_id);
+                if selected_user_id == Some(user_id) {
+                    self.selected_youth_ranks = data;
+                }
             }
             RefreshResult::YouthMeritBadges(user_id, data) => {
                 if let Err(e) = self.cache.save_youth_merit_badges(user_id, &data) {
@@ -1420,7 +1438,37 @@ impl App {
                 }
                 // Store in all_youth_badges for the Badges tab aggregate view
                 self.all_youth_badges.insert(user_id, data.clone());
-                self.selected_youth_badges = data;
+                // Only update selected view if this is the currently selected scout
+                let selected_user_id = self.get_sorted_youth()
+                    .get(self.roster_selection)
+                    .and_then(|y| y.user_id);
+                if selected_user_id == Some(user_id) {
+                    self.selected_youth_badges = data;
+                }
+            }
+            RefreshResult::YouthLeadership(user_id, mut data) => {
+                // Sort: current positions first, then by start date descending
+                data.sort_by(|a, b| {
+                    // Current positions come first
+                    match (a.is_current(), b.is_current()) {
+                        (true, false) => std::cmp::Ordering::Less,
+                        (false, true) => std::cmp::Ordering::Greater,
+                        _ => {
+                            // Sort by start date descending (most recent first)
+                            b.start_date.cmp(&a.start_date)
+                        }
+                    }
+                });
+                if let Err(e) = self.cache.save_youth_leadership(user_id, &data) {
+                    warn!(error = %e, "Failed to cache youth leadership");
+                }
+                // Only update selected view if this is the currently selected scout
+                let selected_user_id = self.get_sorted_youth()
+                    .get(self.roster_selection)
+                    .and_then(|y| y.user_id);
+                if selected_user_id == Some(user_id) {
+                    self.selected_youth_leadership = data;
+                }
             }
             RefreshResult::RankRequirements(user_id, rank_id, data) => {
                 // Cache the requirements
@@ -1481,6 +1529,11 @@ impl App {
                 } else if msg.to_lowercase().contains("unauthorized")
                     || msg.to_lowercase().contains("401")
                 {
+                    // Session expired - prompt for re-login if not offline
+                    if !self.offline_mode {
+                        self.start_login();
+                        self.login_error = Some("Session expired. Please log in again.".to_string());
+                    }
                     "Session expired. Please log in again.".to_string()
                 } else if msg.to_lowercase().contains("network")
                     || msg.to_lowercase().contains("connect")
@@ -1662,6 +1715,55 @@ impl App {
 
             if let Ok(data) = api.fetch_youth_merit_badges(user_id).await {
                 Self::send_result(&tx, RefreshResult::YouthMeritBadges(user_id, data)).await;
+            }
+        });
+    }
+
+    /// Fetch leadership history for a specific youth
+    pub async fn fetch_youth_leadership(&mut self, user_id: i64) {
+        if user_id <= 0 {
+            warn!(user_id, "Invalid user_id for youth leadership fetch");
+            return;
+        }
+
+        // In offline mode, use cached data only
+        if self.offline_mode {
+            if let Ok(Some(cached)) = self.cache.load_youth_leadership(user_id) {
+                self.selected_youth_leadership = cached.data;
+            }
+            return;
+        }
+
+        let token = match self.session.token() {
+            Some(t) => t.to_string(),
+            None => return,
+        };
+
+        let tx = self.refresh_tx.clone();
+
+        // Try to load from cache first
+        if let Ok(Some(cached)) = self.cache.load_youth_leadership(user_id) {
+            if !cached.is_stale() {
+                self.selected_youth_leadership = cached.data;
+                return; // Cache is fresh, no need to fetch
+            }
+        }
+
+        // Fetch fresh data in background
+        tokio::spawn(async move {
+            let api = match ApiClient::new() {
+                Ok(mut api) => {
+                    api.set_token(token);
+                    api
+                }
+                Err(e) => {
+                    error!(error = %e, "Failed to create API client for youth leadership");
+                    return;
+                }
+            };
+
+            if let Ok(data) = api.fetch_youth_leadership(user_id).await {
+                Self::send_result(&tx, RefreshResult::YouthLeadership(user_id, data)).await;
             }
         });
     }

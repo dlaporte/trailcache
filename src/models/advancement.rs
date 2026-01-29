@@ -1,6 +1,7 @@
 // Allow dead code: API response structs have fields for completeness
 #![allow(dead_code)]
 
+use chrono::NaiveDate;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -383,5 +384,65 @@ impl MeritBadgeProgress {
 
     pub fn progress_percent(&self) -> Option<i32> {
         self.percent_completed.map(|p| (p * 100.0) as i32)
+    }
+}
+
+// Leadership position history from API
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct LeadershipPosition {
+    pub position: Option<String>,
+    #[serde(rename = "startDate")]
+    pub start_date: Option<String>,
+    #[serde(rename = "endDate")]
+    pub end_date: Option<String>,
+    #[serde(rename = "numberOfDaysInPosition")]
+    pub days_served: Option<i32>,
+    pub patrol: Option<String>,
+    pub rank: Option<String>,
+}
+
+impl LeadershipPosition {
+    /// Returns the position name, or "Unknown Position" if not set
+    pub fn name(&self) -> &str {
+        self.position.as_deref().unwrap_or("Unknown Position")
+    }
+
+    /// Returns true if this is a current position (no end date or end date in future)
+    pub fn is_current(&self) -> bool {
+        self.end_date.is_none() || self.end_date.as_deref() == Some("")
+    }
+
+    /// Format the date range for display
+    pub fn date_range(&self) -> String {
+        let start = format_date(self.start_date.as_deref());
+        if self.is_current() {
+            format!("{} - Present", start)
+        } else {
+            let end = format_date(self.end_date.as_deref());
+            format!("{} - {}", start, end)
+        }
+    }
+
+    /// Format days served for display
+    pub fn days_display(&self) -> String {
+        match self.days_served {
+            Some(days) if days > 0 => format!("{} days", days),
+            _ => String::new(),
+        }
+    }
+}
+
+/// Format a date string from "YYYY-MM-DD" to "Month DD, YYYY"
+fn format_date(date: Option<&str>) -> String {
+    match date {
+        Some(d) if d.len() >= 10 => {
+            if let Ok(parsed) = NaiveDate::parse_from_str(&d[..10], "%Y-%m-%d") {
+                parsed.format("%b %d, %Y").to_string()
+            } else {
+                d.to_string()
+            }
+        }
+        Some(d) => d.to_string(),
+        None => "?".to_string(),
     }
 }

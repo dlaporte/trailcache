@@ -14,10 +14,10 @@ use tracing::{debug, warn};
 
 use crate::auth::SessionData;
 use crate::models::{
-    Adult, AdvancementDashboard, Event, EventGuest, MeritBadgeProgress, MeritBadgeRequirement,
-    MeritBadgeWithRequirements, OrgAdultsResponse, OrgYouthsResponse, Parent, ParentResponse,
-    Patrol, RankProgress, RankRequirement, RankWithRequirements, RanksResponse, ReadyToAward,
-    UnitYouthsResponse, Youth,
+    Adult, AdvancementDashboard, Event, EventGuest, LeadershipPosition, MeritBadgeProgress,
+    MeritBadgeRequirement, MeritBadgeWithRequirements, OrgAdultsResponse, OrgYouthsResponse,
+    Parent, ParentResponse, Patrol, RankProgress, RankRequirement, RankWithRequirements,
+    RanksResponse, ReadyToAward, UnitYouthsResponse, Youth,
     // Domain types for unit info
     Commissioner, Key3Leaders, Leader, MeetingLocation, OrgProfile, UnitContact, UnitInfo,
 };
@@ -484,6 +484,26 @@ impl ApiClient {
 
         let text = response.text().await?;
         debug!("Merit badges response received");
+        Ok(serde_json::from_str(&text)?)
+    }
+
+    /// Fetch leadership position history for a specific youth member
+    pub async fn fetch_youth_leadership(&self, user_id: i64) -> Result<Vec<LeadershipPosition>> {
+        let url = format!(
+            "{}/advancements/youth/{}/leadershipPositionHistory?summary=true",
+            API_BASE_URL, user_id
+        );
+        let response = self
+            .client
+            .get(&url)
+            .headers(self.auth_headers()?)
+            .send()
+            .await?;
+
+        let response = Self::check_response(response).await?;
+
+        let text = response.text().await?;
+        debug!("Leadership history response received");
         Ok(serde_json::from_str(&text)?)
     }
 

@@ -179,23 +179,25 @@ fn render_ranks_view(frame: &mut Frame, app: &App, selected: Option<&&crate::mod
                 lines.push(Line::from(Span::styled("Rank Progress (Enter to view requirements)", styles::highlight_style())));
                 lines.push(Line::from(""));
 
-                for (i, rank) in app.selected_youth_ranks.iter().enumerate() {
-                    let is_selected = i == app.advancement_rank_selection && focused;
+                let ranks_len = app.selected_youth_ranks.len();
+                for (i, rank) in app.selected_youth_ranks.iter().rev().enumerate() {
+                    // Map reversed display index to original index for selection
+                    let original_idx = ranks_len.saturating_sub(1).saturating_sub(i);
+                    let is_selected = original_idx == app.advancement_rank_selection && focused;
                     let prefix = if is_selected { "> " } else { "  " };
 
                     let (status_text, status_style) = if rank.is_awarded() {
-                        ("Awarded", styles::success_style())
+                        ("Awarded".to_string(), styles::success_style())
                     } else if rank.is_completed() {
-                        ("Complete", styles::highlight_style())
+                        ("Complete".to_string(), styles::highlight_style())
                     } else if let Some(pct) = rank.progress_percent() {
                         if pct > 0 {
-                            let text = format!("{}%", pct);
-                            (text.leak() as &str, styles::muted_style())
+                            (format!("{}%", pct), styles::highlight_style())
                         } else {
-                            (placeholder, styles::muted_style())
+                            (placeholder.to_string(), styles::muted_style())
                         }
                     } else {
-                        (placeholder, styles::muted_style())
+                        (placeholder.to_string(), styles::muted_style())
                     };
 
                     let rank_style = if is_selected {
