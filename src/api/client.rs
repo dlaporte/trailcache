@@ -14,7 +14,7 @@ use tracing::{debug, warn};
 
 use crate::auth::SessionData;
 use crate::models::{
-    Adult, AdvancementDashboard, Event, EventGuest, LeadershipPosition, MeritBadgeProgress,
+    Adult, AdvancementDashboard, Award, Event, EventGuest, LeadershipPosition, MeritBadgeProgress,
     MeritBadgeRequirement, MeritBadgeWithRequirements, OrgAdultsResponse, OrgYouthsResponse,
     Parent, ParentResponse, Patrol, RankProgress, RankRequirement, RankWithRequirements,
     RanksResponse, ReadyToAward, UnitYouthsResponse, Youth,
@@ -461,8 +461,8 @@ impl ApiClient {
             }
         }
 
-        // Sort by level ascending (Scout first, Eagle last)
-        ranks.sort_by(|a, b| a.level.cmp(&b.level));
+        // Sort by rank order ascending (Scout first, Eagle last) - reversed at display time
+        ranks.sort_by(|a, b| a.sort_order().cmp(&b.sort_order()));
 
         Ok(ranks)
     }
@@ -505,6 +505,30 @@ impl ApiClient {
         let text = response.text().await?;
         debug!("Leadership history response received");
         Ok(serde_json::from_str(&text)?)
+    }
+
+    /// Fetch awards for a specific youth member
+    pub async fn fetch_youth_awards(&self, user_id: i64) -> Result<Vec<Award>> {
+        let url = format!(
+            "{}/advancements/v2/youth/{}/awards",
+            API_BASE_URL, user_id
+        );
+        debug!("Fetching awards from: {}", url);
+        let response = self
+            .client
+            .get(&url)
+            .headers(self.auth_headers()?)
+            .send()
+            .await?;
+
+        let response = Self::check_response(response).await?;
+
+        let text = response.text().await?;
+        debug!("Awards response received: {} bytes", text.len());
+        let awards: Vec<Award> = serde_json::from_str(&text)
+            .context("Failed to parse awards response")?;
+        debug!("Parsed {} awards", awards.len());
+        Ok(awards)
     }
 
     /// Fetch requirements for a specific rank for a youth member

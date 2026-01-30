@@ -21,7 +21,7 @@ use crate::config::Config;
 use crate::models::{
     Adult, AdvancementDashboard, Commissioner, Event, EventGuest, EventSortColumn,
     Key3Leaders, LeadershipPosition, MeritBadgeProgress, MeritBadgeRequirement, OrgProfile,
-    Parent, Patrol, RankProgress, RankRequirement, ReadyToAward, ScoutSortColumn, UnitInfo, Youth,
+    Award, Parent, Patrol, RankProgress, RankRequirement, ReadyToAward, ScoutSortColumn, UnitInfo, Youth,
 };
 use crate::utils::{cmp_ignore_case, contains_ignore_case};
 
@@ -192,6 +192,7 @@ pub enum ScoutDetailView {
     Ranks,
     MeritBadges,
     Leadership,
+    Awards,
 }
 
 /// Sub-view for event detail panel
@@ -271,6 +272,8 @@ enum RefreshResult {
     YouthMeritBadges(i64, Vec<MeritBadgeProgress>),
     /// Leadership position history for a specific youth (user_id, positions)
     YouthLeadership(i64, Vec<LeadershipPosition>),
+    /// Awards for a specific youth (user_id, awards)
+    YouthAwards(i64, Vec<Award>),
     /// Requirements for a specific rank (user_id, rank_id, requirements)
     RankRequirements(i64, i64, Vec<RankRequirement>),
     /// Requirements for a specific merit badge (user_id, badge_id, requirements, version)
@@ -380,12 +383,15 @@ pub struct App {
     pub selected_youth_ranks: Vec<RankProgress>,
     pub selected_youth_badges: Vec<MeritBadgeProgress>,
     pub selected_youth_leadership: Vec<LeadershipPosition>,
+    pub selected_youth_awards: Vec<Award>,
+    pub awards_loaded: bool,
     pub selected_rank_requirements: Vec<RankRequirement>,
     pub selected_badge_requirements: Vec<MeritBadgeRequirement>,
     pub selected_badge_version: Option<String>,
     pub viewing_requirements: bool,
     pub requirement_selection: usize,
     pub leadership_selection: usize,
+    pub awards_selection: usize,
 
     // Track which requirements are currently being viewed (to prevent overwrites from background fetches)
     viewing_rank_user_id: Option<i64>,
@@ -507,7 +513,7 @@ impl App {
             ranks_viewing_requirements: false,
             ranks_requirement_selection: 0,
             ranks_sort_by_count: false,
-            ranks_sort_ascending: true,
+            ranks_sort_ascending: false,
 
             badges_selection: 0,
             badges_scout_selection: 0,
@@ -536,12 +542,15 @@ impl App {
             selected_youth_ranks: Vec::new(),
             selected_youth_badges: Vec::new(),
             selected_youth_leadership: Vec::new(),
+            selected_youth_awards: Vec::new(),
+            awards_loaded: false,
             selected_rank_requirements: Vec::new(),
             selected_badge_requirements: Vec::new(),
             selected_badge_version: None,
             viewing_requirements: false,
             requirement_selection: 0,
             leadership_selection: 0,
+            awards_selection: 0,
 
             viewing_rank_user_id: None,
             viewing_rank_id: None,
@@ -1754,6 +1763,31 @@ impl App {
                     self.selected_youth_leadership = data;
                 }
             }
+            RefreshResult::YouthAwards(user_id, mut data) => {
+                // Sort: awarded first, then by date descending
+                data.sort_by(|a, b| {
+                    // Awarded items come first
+                    match (a.is_awarded(), b.is_awarded()) {
+                        (true, false) => std::cmp::Ordering::Less,
+                        (false, true) => std::cmp::Ordering::Greater,
+                        _ => {
+                            // Sort by awarded date descending (most recent first)
+                            b.date_awarded.cmp(&a.date_awarded)
+                        }
+                    }
+                });
+                if let Err(e) = self.cache.save_youth_awards(user_id, &data) {
+                    warn!(error = %e, "Failed to cache youth awards");
+                }
+                // Only update selected view if this is the currently selected scout
+                let selected_user_id = self.get_sorted_youth()
+                    .get(self.roster_selection)
+                    .and_then(|y| y.user_id);
+                if selected_user_id == Some(user_id) {
+                    self.selected_youth_awards = data;
+                    self.awards_loaded = true;
+                }
+            }
             RefreshResult::RankRequirements(user_id, rank_id, data) => {
                 // Cache the requirements
                 if let Err(e) = self.cache.save_rank_requirements(user_id, rank_id, &data) {
@@ -2130,6 +2164,56 @@ impl App {
             if let Ok(data) = api.fetch_youth_leadership(user_id).await {
                 Self::send_result(&tx, RefreshResult::YouthLeadership(user_id, data)).await;
             }
+        });
+    }
+
+    /// Fetch awards for a specific youth
+    pub async fn fetch_youth_awards(&mut self, user_id: i64) {
+        if user_id <= 0 {
+            warn!(user_id, "Invalid user_id for youth awards fetch");
+            return;
+        }
+
+        // In offline mode, use cached data only
+        if self.offline_mode {
+            if let Ok(Some(cached)) = self.cache.load_youth_awards(user_id) {
+                self.selected_youth_awards = cached.data;
+            }
+            self.awards_loaded = true;
+            return;
+        }
+
+        let token = match self.session.token() {
+            Some(t) => t.to_string(),
+            None => return,
+        };
+
+        let tx = self.refresh_tx.clone();
+
+        // Try to load from cache first
+        if let Ok(Some(cached)) = self.cache.load_youth_awards(user_id) {
+            if !cached.is_stale() {
+                self.selected_youth_awards = cached.data;
+                self.awards_loaded = true;
+                return; // Cache is fresh, no need to fetch
+            }
+        }
+
+        // Fetch fresh data in background
+        tokio::spawn(async move {
+            let api = match create_authenticated_api(token) {
+                Ok(api) => api,
+                Err(e) => {
+                    error!(error = %e, "Failed to create API client for youth awards");
+                    // Send empty result so UI shows "No awards" instead of loading forever
+                    Self::send_result(&tx, RefreshResult::YouthAwards(user_id, vec![])).await;
+                    return;
+                }
+            };
+
+            // Send result even if empty or on error
+            let data = api.fetch_youth_awards(user_id).await.unwrap_or_default();
+            Self::send_result(&tx, RefreshResult::YouthAwards(user_id, data)).await;
         });
     }
 

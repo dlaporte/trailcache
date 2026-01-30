@@ -31,13 +31,15 @@ async fn cycle_scout_detail_view(app: &mut App, direction: CycleDirection) {
             ScoutDetailView::Details => ScoutDetailView::Ranks,
             ScoutDetailView::Ranks => ScoutDetailView::MeritBadges,
             ScoutDetailView::MeritBadges => ScoutDetailView::Leadership,
-            ScoutDetailView::Leadership => ScoutDetailView::Details,
+            ScoutDetailView::Leadership => ScoutDetailView::Awards,
+            ScoutDetailView::Awards => ScoutDetailView::Details,
         },
         CycleDirection::Backward => match app.scout_detail_view {
-            ScoutDetailView::Details => ScoutDetailView::Leadership,
+            ScoutDetailView::Details => ScoutDetailView::Awards,
             ScoutDetailView::Ranks => ScoutDetailView::Details,
             ScoutDetailView::MeritBadges => ScoutDetailView::Ranks,
             ScoutDetailView::Leadership => ScoutDetailView::MeritBadges,
+            ScoutDetailView::Awards => ScoutDetailView::Leadership,
         },
     };
 
@@ -46,13 +48,20 @@ async fn cycle_scout_detail_view(app: &mut App, direction: CycleDirection) {
     app.advancement_view = match new_view {
         ScoutDetailView::Ranks => AdvancementView::Ranks,
         ScoutDetailView::MeritBadges => AdvancementView::MeritBadges,
-        ScoutDetailView::Details | ScoutDetailView::Leadership => app.advancement_view, // unchanged
+        ScoutDetailView::Details | ScoutDetailView::Leadership | ScoutDetailView::Awards => app.advancement_view, // unchanged
     };
     app.viewing_requirements = false;
     // Reset selection when switching views (ranks start at top/Eagle since reversed)
     app.advancement_rank_selection = app.selected_youth_ranks.len().saturating_sub(1);
     app.advancement_badge_selection = 0;
     app.leadership_selection = 0;
+    app.awards_selection = 0;
+
+    // Reset awards state when switching to awards view
+    if new_view == ScoutDetailView::Awards {
+        app.selected_youth_awards.clear();
+        app.awards_loaded = false;
+    }
 
     // Load data if switching to data views
     if let Some(uid) = user_id {
@@ -62,6 +71,9 @@ async fn cycle_scout_detail_view(app: &mut App, direction: CycleDirection) {
             }
             ScoutDetailView::Leadership => {
                 app.fetch_youth_leadership(uid).await;
+            }
+            ScoutDetailView::Awards => {
+                app.fetch_youth_awards(uid).await;
             }
             ScoutDetailView::Details => {}
         }
@@ -460,6 +472,24 @@ async fn handle_scouts_input(app: &mut App, key: KeyEvent) -> Result<()> {
             }
             return Ok(());
         }
+        KeyCode::Char('a') => {
+            // Switch to Awards view
+            let user_id = app.get_sorted_youth()
+                .get(app.roster_selection)
+                .and_then(|y| y.user_id);
+
+            app.scout_detail_view = ScoutDetailView::Awards;
+            app.focus = Focus::Detail;
+            app.viewing_requirements = false;
+            app.awards_selection = 0;
+            app.selected_youth_awards.clear();
+            app.awards_loaded = false;
+            // Load awards data
+            if let Some(uid) = user_id {
+                app.fetch_youth_awards(uid).await;
+            }
+            return Ok(());
+        }
         _ => {}
     }
 
@@ -613,7 +643,7 @@ async fn handle_scouts_input(app: &mut App, key: KeyEvent) -> Result<()> {
                                     }
                                 }
                             }
-                            ScoutDetailView::Details | ScoutDetailView::Leadership => {}
+                            ScoutDetailView::Details | ScoutDetailView::Leadership | ScoutDetailView::Awards => {}
                         }
                     }
                 }

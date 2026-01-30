@@ -100,6 +100,14 @@ pub struct RankProgress {
 }
 
 impl RankProgress {
+    /// Get sort order for rank (higher = more advanced, Eagle = 7, Scout = 1)
+    pub fn sort_order(&self) -> i32 {
+        // Use level if available, otherwise derive from name using ScoutRank
+        self.level.unwrap_or_else(|| {
+            crate::app::ScoutRank::from_str(Some(&self.rank_name)).order() as i32
+        })
+    }
+
     pub fn from_api(rank: &RankFromApi) -> Self {
         // Convert empty strings to None
         let date_completed = rank.date_earned.clone()
@@ -432,8 +440,92 @@ impl LeadershipPosition {
     }
 }
 
+// Youth award from API (e.g., Eagle Palm, 50-miler, etc.)
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(default)]
+pub struct Award {
+    #[serde(alias = "awardId")]
+    pub id: Option<i64>,
+    pub name: Option<String>,
+    #[serde(rename = "dateStarted")]
+    pub date_started: Option<String>,
+    #[serde(rename = "dateCompleted", alias = "markedCompletedDate")]
+    pub date_completed: Option<String>,
+    #[serde(rename = "dateEarned")]
+    pub date_earned: Option<String>,
+    #[serde(rename = "dateAwarded", alias = "awardedDate")]
+    pub date_awarded: Option<String>,
+    #[serde(rename = "awardType")]
+    pub award_type: Option<String>,
+    pub status: Option<String>,
+    /// v2 API uses boolean `awarded` field
+    pub awarded: Option<bool>,
+    #[serde(rename = "percentCompleted")]
+    pub percent_completed: Option<f32>,
+    #[serde(rename = "leaderApprovedDate")]
+    pub leader_approved_date: Option<String>,
+}
+
+impl Award {
+    /// Returns the award name, or "Unknown Award" if not set
+    pub fn name(&self) -> &str {
+        self.name.as_deref().unwrap_or("Unknown Award")
+    }
+
+    /// Returns true if this award has been awarded (status is "Awarded", awarded=true, or has awarded date)
+    pub fn is_awarded(&self) -> bool {
+        self.awarded == Some(true)
+            || self.status.as_deref() == Some("Awarded")
+            || self.date_awarded.as_ref().map(|s| !s.is_empty()).unwrap_or(false)
+    }
+
+    /// Returns true if this award is completed (status is "Awarded" or "Leader Approved", or has leader approved date)
+    pub fn is_completed(&self) -> bool {
+        matches!(
+            self.status.as_deref(),
+            Some("Awarded") | Some("Leader Approved")
+        ) || self.date_completed.as_ref().map(|s| !s.is_empty()).unwrap_or(false)
+            || self.leader_approved_date.as_ref().map(|s| !s.is_empty()).unwrap_or(false)
+    }
+
+    /// Format the date for display
+    pub fn date_display(&self) -> String {
+        if let Some(ref date) = self.date_awarded {
+            if !date.is_empty() {
+                return format_date(Some(date));
+            }
+        }
+        if let Some(ref date) = self.date_completed {
+            if !date.is_empty() {
+                return format_date(Some(date));
+            }
+        }
+        if let Some(ref date) = self.date_earned {
+            if !date.is_empty() {
+                return format!("{} (earned)", format_date(Some(date)));
+            }
+        }
+        if let Some(ref date) = self.date_started {
+            if !date.is_empty() {
+                return format!("{} (started)", format_date(Some(date)));
+            }
+        }
+        "?".to_string()
+    }
+
+    /// Get the award type for display
+    pub fn type_display(&self) -> &str {
+        self.award_type.as_deref().unwrap_or("")
+    }
+
+    /// Get progress percentage if available
+    pub fn progress_percent(&self) -> Option<i32> {
+        self.percent_completed.map(|p| (p * 100.0) as i32)
+    }
+}
+
 /// Format a date string from "YYYY-MM-DD" to "Month DD, YYYY"
-fn format_date(date: Option<&str>) -> String {
+pub fn format_date(date: Option<&str>) -> String {
     match date {
         Some(d) if d.len() >= 10 => {
             if let Ok(parsed) = NaiveDate::parse_from_str(&d[..10], "%Y-%m-%d") {
@@ -444,5 +536,20 @@ fn format_date(date: Option<&str>) -> String {
         }
         Some(d) => d.to_string(),
         None => "?".to_string(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_award_v2_deserialization() {
+        let json = r#"{"awardId": 33, "name": "Honor Medal", "status": "Started", "awarded": false, "percentCompleted": 0}"#;
+        let award: Award = serde_json::from_str(json).expect("Failed to parse");
+        assert_eq!(award.id, Some(33));
+        assert_eq!(award.name, Some("Honor Medal".to_string()));
+        assert_eq!(award.status, Some("Started".to_string()));
+        assert_eq!(award.awarded, Some(false));
     }
 }

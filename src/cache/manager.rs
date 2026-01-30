@@ -12,7 +12,7 @@ use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use tracing::debug;
 
 use crate::models::{
-    Adult, AdvancementDashboard, Commissioner, Event, Key3Leaders, LeadershipPosition,
+    Adult, AdvancementDashboard, Award, Commissioner, Event, Key3Leaders, LeadershipPosition,
     MeritBadgeProgress, OrgProfile, Parent, Patrol, RankProgress, ReadyToAward, UnitInfo, Youth,
 };
 
@@ -305,6 +305,21 @@ impl CacheManager {
         positions: &[LeadershipPosition],
     ) -> Result<()> {
         self.save(&format!("leadership_{}", user_id), &positions)
+    }
+
+    pub fn load_youth_awards(
+        &self,
+        user_id: i64,
+    ) -> Result<Option<CachedData<Vec<Award>>>> {
+        self.load(&format!("awards_{}", user_id))
+    }
+
+    pub fn save_youth_awards(
+        &self,
+        user_id: i64,
+        awards: &[Award],
+    ) -> Result<()> {
+        self.save(&format!("awards_{}", user_id), &awards)
     }
 
     // ===== Unit Info =====

@@ -13,7 +13,7 @@ use ratatui::{
 };
 
 use crate::app::{App, Focus, ScoutRank};
-use crate::models::{RankProgress, Youth};
+use crate::models::{format_date, RankProgress, Youth};
 use crate::ui::styles;
 use crate::utils::truncate;
 
@@ -268,26 +268,18 @@ fn render_scout_list(frame: &mut Frame, app: &App, area: Rect) {
                 styles::list_item_style()
             };
 
-            let format_date = |d: &str| -> String {
-                chrono::NaiveDate::parse_from_str(&d[..10.min(d.len())], "%Y-%m-%d")
-                    .ok()
-                    .map(|parsed| parsed.format("%b %d, %Y").to_string())
-                    .unwrap_or_else(|| d.chars().take(10).collect())
-            };
-
             let progress = match &srp.rank {
                 Some(rank) if rank.is_awarded() => {
-                    let date = rank.date_awarded.as_ref()
-                        .or(rank.date_completed.as_ref())
-                        .map(|d| format_date(d))
-                        .unwrap_or_else(|| "Awarded".to_string());
-                    (date, styles::success_style())
+                    let date_str = rank.date_awarded.as_deref()
+                        .or(rank.date_completed.as_deref());
+                    let date = format_date(date_str);
+                    let display = if date == "?" { "Awarded".to_string() } else { date };
+                    (display, styles::success_style())
                 }
                 Some(rank) if rank.is_completed() => {
-                    let date = rank.date_completed.as_ref()
-                        .map(|d| format_date(d))
-                        .unwrap_or_else(|| "Done".to_string());
-                    (date, styles::highlight_style())
+                    let date = format_date(rank.date_completed.as_deref());
+                    let display = if date == "?" { "Done".to_string() } else { date };
+                    (display, styles::highlight_style())
                 }
                 Some(rank) => {
                     if let Some(pct) = rank.progress_percent() {
@@ -395,14 +387,10 @@ fn render_requirements_view(frame: &mut Frame, app: &App, area: Rect, focused: b
             if is_selected && req.is_completed() {
                 if let Some(ref date) = req.date_completed {
                     if !date.is_empty() {
-                        let formatted_date = chrono::NaiveDate::parse_from_str(&date[..10.min(date.len())], "%Y-%m-%d")
-                            .ok()
-                            .map(|d| d.format("%b %d, %Y").to_string())
-                            .unwrap_or_else(|| date.chars().take(10).collect());
                         lines.push(Line::from(vec![
                             Span::raw("          "),
                             Span::styled("Completed: ", styles::muted_style()),
-                            Span::styled(formatted_date, styles::highlight_style()),
+                            Span::styled(format_date(Some(date)), styles::highlight_style()),
                         ]));
                     }
                 }

@@ -7,7 +7,7 @@ use ratatui::{
 };
 
 use crate::app::{App, Focus, ScoutDetailView};
-use crate::models::ScoutSortColumn;
+use crate::models::{format_date, ScoutSortColumn};
 use crate::ui::styles;
 use crate::ui::tabs::advancement::get_sorted_badges;
 
@@ -110,6 +110,7 @@ fn render_scout_detail(frame: &mut Frame, app: &App, area: Rect) {
         ScoutDetailView::Ranks => render_ranks_view(frame, app, selected, area, focused),
         ScoutDetailView::MeritBadges => render_badges_view(frame, app, selected, area, focused),
         ScoutDetailView::Leadership => render_leadership_view(frame, app, selected, area, focused),
+        ScoutDetailView::Awards => render_awards_view(frame, app, selected, area, focused),
     }
 }
 
@@ -348,32 +349,20 @@ fn render_ranks_view(frame: &mut Frame, app: &App, selected: Option<&&crate::mod
                 lines.push(Line::from(Span::styled("Rank Progress (Enter to view requirements)", styles::highlight_style())));
                 lines.push(Line::from(""));
 
-                let ranks_len = app.selected_youth_ranks.len();
                 for (i, rank) in app.selected_youth_ranks.iter().rev().enumerate() {
-                    // Map reversed display index to original index for selection
-                    let original_idx = ranks_len.saturating_sub(1).saturating_sub(i);
+                    let original_idx = app.selected_youth_ranks.len().saturating_sub(1).saturating_sub(i);
                     let is_selected = original_idx == app.advancement_rank_selection && focused;
-
-                    // Format date helper
-                    let format_date = |d: &str| -> String {
-                        chrono::NaiveDate::parse_from_str(&d[..10.min(d.len())], "%Y-%m-%d")
-                            .ok()
-                            .map(|parsed| parsed.format("%b %d, %Y").to_string())
-                            .unwrap_or_else(|| d.chars().take(10).collect())
-                    };
 
                     let (status_text, status_style) = if rank.is_awarded() {
                         // Show awarded date in green
-                        let date = rank.date_awarded.as_ref()
-                            .map(|d| format_date(d))
-                            .unwrap_or_else(|| "Awarded".to_string());
-                        (date, styles::success_style())
+                        let date = format_date(rank.date_awarded.as_deref());
+                        let display = if date == "?" { "Awarded".to_string() } else { date };
+                        (display, styles::success_style())
                     } else if rank.is_completed() {
                         // Show completed date in yellow
-                        let date = rank.date_completed.as_ref()
-                            .map(|d| format_date(d))
-                            .unwrap_or_else(|| "Complete".to_string());
-                        (date, styles::highlight_style())
+                        let date = format_date(rank.date_completed.as_deref());
+                        let display = if date == "?" { "Complete".to_string() } else { date };
+                        (display, styles::highlight_style())
                     } else if let Some(pct) = rank.progress_percent() {
                         if pct > 0 {
                             (format!("{}%", pct), styles::highlight_style())
@@ -544,14 +533,9 @@ fn render_badges_view(frame: &mut Frame, app: &App, selected: Option<&&crate::mo
                     let eagle_marker = if badge.is_eagle_required.unwrap_or(false) { "*" } else { " " };
 
                     let (status_text, status_style) = if badge.is_completed() {
-                        let date = badge.date_completed.as_ref()
-                            .and_then(|d| {
-                                chrono::NaiveDate::parse_from_str(&d[..10.min(d.len())], "%Y-%m-%d")
-                                    .ok()
-                                    .map(|parsed| parsed.format("%b %d, %Y").to_string())
-                            })
-                            .unwrap_or_else(|| "Done".to_string());
-                        (date, styles::success_style())
+                        let date = format_date(badge.date_completed.as_deref());
+                        let display = if date == "?" { "Done".to_string() } else { date };
+                        (display, styles::success_style())
                     } else if let Some(pct) = badge.progress_percent() {
                         (format!("{}%", pct), styles::highlight_style())
                     } else {
@@ -661,14 +645,10 @@ fn render_badge_requirements_view(frame: &mut Frame, app: &App, selected: Option
             if is_selected && req.is_completed() {
                 if let Some(ref date) = req.date_completed {
                     if !date.is_empty() {
-                        let formatted_date = chrono::NaiveDate::parse_from_str(&date[..10.min(date.len())], "%Y-%m-%d")
-                            .ok()
-                            .map(|d| d.format("%b %d, %Y").to_string())
-                            .unwrap_or_else(|| date.chars().take(10).collect());
                         lines.push(Line::from(vec![
                             Span::raw("        "),
                             Span::styled("Completed: ", styles::muted_style()),
-                            Span::styled(formatted_date, styles::highlight_style()),
+                            Span::styled(format_date(Some(date)), styles::highlight_style()),
                         ]));
                     }
                 }
@@ -1016,6 +996,79 @@ fn render_leadership_view(frame: &mut Frame, app: &App, selected: Option<&&crate
                     ]));
 
                     lines.push(Line::from(""));
+                }
+            }
+
+            lines
+        }
+        None => vec![Line::from(Span::styled(
+            "Select a scout from the list",
+            styles::muted_style(),
+        ))],
+    };
+
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_style(styles::border_style(focused));
+
+    let paragraph = Paragraph::new(content).block(block);
+    frame.render_widget(paragraph, area);
+}
+
+fn render_awards_view(frame: &mut Frame, app: &App, selected: Option<&&crate::models::Youth>, area: Rect, focused: bool) {
+    let content = match selected {
+        Some(youth) => {
+            let mut lines = vec![];
+
+            // Scout name header
+            lines.push(Line::from(Span::styled(
+                youth.display_name(),
+                styles::title_style(),
+            )));
+
+            lines.push(Line::from(""));
+
+            if !app.awards_loaded {
+                lines.push(Line::from(Span::styled(
+                    "Loading awards...",
+                    styles::muted_style(),
+                )));
+            } else if app.selected_youth_awards.is_empty() {
+                lines.push(Line::from(Span::styled(
+                    "No awards",
+                    styles::muted_style(),
+                )));
+            } else {
+                // Filter to only show completed/awarded awards (those with a date)
+                let completed_awards: Vec<_> = app.selected_youth_awards
+                    .iter()
+                    .filter(|a| a.is_awarded())
+                    .collect();
+
+                if completed_awards.is_empty() {
+                    lines.push(Line::from(Span::styled(
+                        "No completed awards",
+                        styles::muted_style(),
+                    )));
+                } else {
+                    lines.push(Line::from(Span::styled("Awards", styles::highlight_style())));
+                    lines.push(Line::from(""));
+
+                    for award in completed_awards {
+                        lines.push(Line::from(Span::styled(
+                            award.name().to_string(),
+                            styles::success_style(),
+                        )));
+
+                        // Show date
+                        lines.push(Line::from(vec![
+                            Span::raw("  "),
+                            Span::styled("Date: ", styles::muted_style()),
+                            Span::styled(award.date_display(), styles::list_item_style()),
+                        ]));
+
+                        lines.push(Line::from(""));
+                    }
                 }
             }
 

@@ -129,6 +129,7 @@ fn render_tabs(frame: &mut Frame, app: &App, area: Rect) {
             ("[r]anks", app.scout_detail_view == ScoutDetailView::Ranks),
             ("[m]erit badges", app.scout_detail_view == ScoutDetailView::MeritBadges),
             ("[l]eadership", app.scout_detail_view == ScoutDetailView::Leadership),
+            ("[a]wards", app.scout_detail_view == ScoutDetailView::Awards),
         ]),
         Tab::Events => Some(vec![
             ("[d]etails", app.event_detail_view == EventDetailView::Details),
