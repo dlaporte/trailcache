@@ -326,6 +326,18 @@ fn render_requirements_view(frame: &mut Frame, app: &App, area: Rect, focused: b
     if app.selected_badge_requirements.is_empty() {
         lines.push(Line::from(Span::styled("Loading requirements...", styles::muted_style())));
     } else {
+        // Show counselor info if available (from the detail fetch)
+        if let Some(ref counselor) = app.selected_badge_counselor {
+            let name = counselor.full_name();
+            if !name.is_empty() {
+                lines.push(Line::from(vec![
+                    Span::styled("Counselor: ", styles::muted_style()),
+                    Span::styled(name, styles::highlight_style()),
+                ]));
+                lines.push(Line::from(""));
+            }
+        }
+
         // Count completed
         let completed = app.selected_badge_requirements.iter().filter(|r| r.is_completed()).count();
         let total = app.selected_badge_requirements.len();

@@ -21,6 +21,7 @@ use crate::models::{
     // Domain types for unit info
     Commissioner, Key3Leaders, Leader, MeetingLocation, OrgProfile, UnitContact, UnitInfo,
 };
+use crate::models::advancement::CounselorInfo;
 
 use super::ApiError;
 
@@ -561,16 +562,24 @@ impl ApiClient {
         Ok(rank.requirements)
     }
 
-    /// Fetch badge requirements, returns (requirements, version)
-    pub async fn fetch_badge_requirements(&self, user_id: i64, badge_id: i64) -> Result<(Vec<MeritBadgeRequirement>, Option<String>)> {
-        // Try the requirements endpoint first (like ranks)
-        let url = format!(
+    /// Fetch badge requirements, returns (requirements, version, counselor)
+    pub async fn fetch_badge_requirements(&self, user_id: i64, badge_id: i64) -> Result<(Vec<MeritBadgeRequirement>, Option<String>, Option<CounselorInfo>)> {
+        // We need to call TWO endpoints:
+        // 1. /requirements - has the requirements list but NO counselor
+        // 2. /meritBadges/{id} - has counselor info but NO requirements
+
+        let mut requirements = Vec::new();
+        let mut version = None;
+        let mut counselor = None;
+
+        // First, fetch requirements from the requirements endpoint
+        let req_url = format!(
             "{}/advancements/v2/youth/{}/meritBadges/{}/requirements",
             API_BASE_URL, user_id, badge_id
         );
         let response = self
             .client
-            .get(&url)
+            .get(&req_url)
             .headers(self.auth_headers()?)
             .send()
             .await?;
@@ -579,48 +588,46 @@ impl ApiClient {
             let text = response.text().await?;
             debug!("Badge requirements response received");
 
-            // Try parsing as direct array first (no version info available)
-            if let Ok(requirements) = serde_json::from_str::<Vec<MeritBadgeRequirement>>(&text) {
-                debug!(count = requirements.len(), "Parsed badge requirements as array");
-                return Ok((requirements, None));
-            }
-
-            // Fall back to parsing as badge object with embedded requirements
-            match serde_json::from_str::<MeritBadgeWithRequirements>(&text) {
-                Ok(badge) => {
-                    debug!(count = badge.requirements.len(), version = ?badge.version, "Parsed badge with requirements");
-                    return Ok((badge.requirements, badge.version));
-                }
-                Err(e) => {
-                    warn!(error = %e, "Failed to parse badge requirements");
-                }
+            // Try parsing as badge object with embedded requirements
+            if let Ok(badge) = serde_json::from_str::<MeritBadgeWithRequirements>(&text) {
+                debug!(count = badge.requirements.len(), version = ?badge.version, "Parsed badge with requirements");
+                requirements = badge.requirements;
+                version = badge.version;
+            } else if let Ok(reqs) = serde_json::from_str::<Vec<MeritBadgeRequirement>>(&text) {
+                // Direct array of requirements
+                debug!(count = reqs.len(), "Parsed badge requirements as array");
+                requirements = reqs;
             }
         }
 
-        // Try fetching badge with embedded requirements
-        let url2 = format!(
+        // Second, fetch counselor info from the detail endpoint
+        let detail_url = format!(
             "{}/advancements/v2/youth/{}/meritBadges/{}",
             API_BASE_URL, user_id, badge_id
         );
         let response2 = self
             .client
-            .get(&url2)
+            .get(&detail_url)
             .headers(self.auth_headers()?)
             .send()
             .await?;
 
-        let response2 = Self::check_response(response2).await?;
+        if response2.status().is_success() {
+            let text = response2.text().await?;
+            debug!("Badge detail response received");
 
-        let text = response2.text().await?;
-        debug!("Badge requirements fallback response received");
-
-        // Try parsing as badge object with embedded requirements
-        if let Ok(badge) = serde_json::from_str::<MeritBadgeWithRequirements>(&text) {
-            return Ok((badge.requirements, badge.version));
+            // Parse to extract counselor info
+            if let Ok(badge) = serde_json::from_str::<MeritBadgeWithRequirements>(&text) {
+                debug!(has_counselor = badge.assigned_counselor.is_some(), "Parsed badge detail for counselor");
+                counselor = badge.assigned_counselor;
+                // Also get version from here if we didn't get it from requirements
+                if version.is_none() {
+                    version = badge.version;
+                }
+            }
         }
 
-        // If still no requirements, return empty
-        Ok((vec![], None))
+        Ok((requirements, version, counselor))
     }
 
     /// Fetch all merit badges from the catalog (not youth-specific)
@@ -1086,23 +1093,24 @@ mod tests {
 
     #[test]
     fn test_is_valid_guid() {
-        // Valid GUIDs
-        assert!(ApiClient::is_valid_guid("0E65066C-AB20-4DA0-B3BF-79DFD0668049"));
-        assert!(ApiClient::is_valid_guid("22b210e3-d325-41be-b761-31e18bfe2c73")); // lowercase
+        // Valid GUIDs (synthetic test data)
+        assert!(ApiClient::is_valid_guid("AAAAAAAA-BBBB-CCCC-DDDD-EEEEEEEEEEEE"));
+        assert!(ApiClient::is_valid_guid("aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee")); // lowercase
         assert!(ApiClient::is_valid_guid("00000000-0000-0000-0000-000000000000"));
+        assert!(ApiClient::is_valid_guid("12345678-1234-1234-1234-123456789ABC"));
 
         // Invalid GUIDs
         assert!(!ApiClient::is_valid_guid("")); // empty
         assert!(!ApiClient::is_valid_guid("not-a-guid")); // too short
-        assert!(!ApiClient::is_valid_guid("0E65066CAB204DA0B3BF79DFD0668049")); // no dashes
-        assert!(!ApiClient::is_valid_guid("0E65066C-AB20-4DA0-B3BF-79DFD066804")); // too short
-        assert!(!ApiClient::is_valid_guid("0E65066C-AB20-4DA0-B3BF-79DFD06680490")); // too long
+        assert!(!ApiClient::is_valid_guid("AAAAAAAABBBBCCCCDDDDEEEEEEEEEEEE")); // no dashes
+        assert!(!ApiClient::is_valid_guid("AAAAAAAA-BBBB-CCCC-DDDD-EEEEEEEEEEE")); // too short
+        assert!(!ApiClient::is_valid_guid("AAAAAAAA-BBBB-CCCC-DDDD-EEEEEEEEEEEEE")); // too long
         assert!(!ApiClient::is_valid_guid("ZZZZZZZZ-ZZZZ-ZZZZ-ZZZZ-ZZZZZZZZZZZZ")); // invalid chars
     }
 
     #[test]
     fn test_parse_commissioners_response() {
-        let json = r#"{"organizationGuid": "0E65066C-AB20-4DA0-B3BF-79DFD0668049","organizationType": "Troop","organizationNumber": "0053","organizationCharterName": "St John Evangelist Catholic Church","assignedCommissioners": [{"personGuid": "22B210E3-D325-41BE-B761-31E18BFE2C73","memberId": 8563888,"personId": 5816532,"personfullName": "Robert Diran Sarkisian Jr","firstName": "Robert","middleName": "Diran","lastName": "Sarkisian","nameSuffix": "Jr","positionId": 422,"position": "District Commissioner"}]}"#;
+        let json = r#"{"organizationGuid": "00000000-0000-0000-0000-000000000001","organizationType": "Troop","organizationNumber": "0123","organizationCharterName": "Example Charter Organization","assignedCommissioners": [{"personGuid": "00000000-0000-0000-0000-000000000002","memberId": 1234567,"personId": 7654321,"personfullName": "Jane Marie Doe","firstName": "Jane","middleName": "Marie","lastName": "Doe","nameSuffix": "","positionId": 422,"position": "District Commissioner"}]}"#;
 
         let resp: CommissionersResponse = serde_json::from_str(json)
             .expect("Failed to parse commissioners test JSON");
@@ -1110,8 +1118,8 @@ mod tests {
 
         // Verify API response parses correctly
         let c = &resp.commissioners[0];
-        assert_eq!(c.first_name.as_deref(), Some("Robert"));
-        assert_eq!(c.last_name.as_deref(), Some("Sarkisian"));
+        assert_eq!(c.first_name.as_deref(), Some("Jane"));
+        assert_eq!(c.last_name.as_deref(), Some("Doe"));
         assert_eq!(c.position.as_deref(), Some("District Commissioner"));
 
         // Test conversion to domain type
@@ -1120,7 +1128,7 @@ mod tests {
             last_name: c.last_name.clone(),
             position: c.position.clone(),
         };
-        assert_eq!(domain_commissioner.full_name(), "Robert Sarkisian");
+        assert_eq!(domain_commissioner.full_name(), "Jane Doe");
         assert_eq!(domain_commissioner.position_display(), "District Commissioner");
     }
 }

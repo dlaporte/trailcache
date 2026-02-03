@@ -23,6 +23,7 @@ use crate::models::{
     Key3Leaders, LeadershipPosition, MeritBadgeProgress, MeritBadgeRequirement, OrgProfile,
     Award, Parent, Patrol, RankProgress, RankRequirement, ReadyToAward, ScoutSortColumn, UnitInfo, Youth,
 };
+use crate::models::advancement::CounselorInfo;
 use crate::utils::{cmp_ignore_case, contains_ignore_case};
 
 // ============================================================================
@@ -276,8 +277,8 @@ enum RefreshResult {
     YouthAwards(i64, Vec<Award>),
     /// Requirements for a specific rank (user_id, rank_id, requirements)
     RankRequirements(i64, i64, Vec<RankRequirement>),
-    /// Requirements for a specific merit badge (user_id, badge_id, requirements, version)
-    BadgeRequirements(i64, i64, Vec<MeritBadgeRequirement>, Option<String>),
+    /// Requirements for a specific merit badge (user_id, badge_id, requirements, version, counselor)
+    BadgeRequirements(i64, i64, Vec<MeritBadgeRequirement>, Option<String>, Option<CounselorInfo>),
     /// Key 3 leadership positions (SM, CC, COR)
     Key3(Key3Leaders),
     /// Unit PIN information (charter, contact info)
@@ -388,6 +389,7 @@ pub struct App {
     pub selected_rank_requirements: Vec<RankRequirement>,
     pub selected_badge_requirements: Vec<MeritBadgeRequirement>,
     pub selected_badge_version: Option<String>,
+    pub selected_badge_counselor: Option<CounselorInfo>,
     pub viewing_requirements: bool,
     pub requirement_selection: usize,
     pub leadership_selection: usize,
@@ -547,6 +549,7 @@ impl App {
             selected_rank_requirements: Vec::new(),
             selected_badge_requirements: Vec::new(),
             selected_badge_version: None,
+            selected_badge_counselor: None,
             viewing_requirements: false,
             requirement_selection: 0,
             leadership_selection: 0,
@@ -743,22 +746,11 @@ impl App {
                 Ok(())
             }
             Err(e) => {
-                error!(error = %e, "Login failed");
-                // Provide user-friendly error messages based on error type
-                let user_message = if e.to_string().contains("401")
-                    || e.to_string().to_lowercase().contains("unauthorized")
-                {
-                    "Invalid username or password".to_string()
-                } else if e.to_string().to_lowercase().contains("network")
-                    || e.to_string().to_lowercase().contains("connect")
-                {
-                    "Unable to connect to server. Check your internet connection.".to_string()
-                } else if e.to_string().to_lowercase().contains("timeout") {
-                    "Connection timed out. Please try again.".to_string()
-                } else {
-                    format!("Login failed: {}", e)
-                };
-                self.login_error = Some(user_message);
+                // Don't log to stderr - it corrupts the TUI display
+                // Show error, clear password, and focus password field for retry
+                self.login_error = Some("LOGIN FAILED".to_string());
+                self.login_password.clear();
+                self.login_focus = LoginFocus::Password;
                 Err(e)
             }
         }
@@ -1400,8 +1392,8 @@ impl App {
 
             let results = futures::future::join_all(futures).await;
             for (user_id, badge_id, result) in results {
-                if let Some((reqs, version)) = result {
-                    Self::send_result(tx, RefreshResult::BadgeRequirements(user_id, badge_id, reqs, version)).await;
+                if let Some((reqs, version, counselor)) = result {
+                    Self::send_result(tx, RefreshResult::BadgeRequirements(user_id, badge_id, reqs, version, counselor)).await;
                 }
                 completed += 1;
             }
@@ -1800,7 +1792,7 @@ impl App {
                     self.requirement_selection = 0;
                 }
             }
-            RefreshResult::BadgeRequirements(user_id, badge_id, data, version) => {
+            RefreshResult::BadgeRequirements(user_id, badge_id, data, version, counselor) => {
                 // Cache the requirements
                 if let Err(e) = self.cache.save_badge_requirements(user_id, badge_id, &data, &version) {
                     warn!(error = %e, "Failed to cache badge requirements");
@@ -1809,6 +1801,7 @@ impl App {
                 if self.viewing_badge_user_id == Some(user_id) && self.viewing_badge_id == Some(badge_id) {
                     self.selected_badge_requirements = data;
                     self.selected_badge_version = version;
+                    self.selected_badge_counselor = counselor;
                     self.viewing_requirements = true;
                     self.requirement_selection = 0;
                 }
@@ -2303,8 +2296,8 @@ impl App {
                 }
             };
 
-            if let Ok((reqs, version)) = api.fetch_badge_requirements(uid, bid).await {
-                Self::send_result(&tx, RefreshResult::BadgeRequirements(uid, bid, reqs, version)).await;
+            if let Ok((reqs, version, counselor)) = api.fetch_badge_requirements(uid, bid).await {
+                Self::send_result(&tx, RefreshResult::BadgeRequirements(uid, bid, reqs, version, counselor)).await;
             }
         });
     }

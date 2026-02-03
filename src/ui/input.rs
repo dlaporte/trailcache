@@ -259,6 +259,7 @@ pub async fn handle_input(app: &mut App, key: KeyEvent) -> Result<bool> {
                 app.viewing_requirements = false;
                 app.selected_rank_requirements.clear();
                 app.selected_badge_requirements.clear();
+                app.selected_badge_counselor = None;
                 app.requirement_selection = 0;
             } else if app.current_tab == Tab::Scouts && app.scout_detail_view != ScoutDetailView::Details {
                 // Go back to details view from Ranks/MeritBadges/Leadership
@@ -276,6 +277,7 @@ pub async fn handle_input(app: &mut App, key: KeyEvent) -> Result<bool> {
                 // Go back from requirements view to scout list
                 app.badges_viewing_requirements = false;
                 app.selected_badge_requirements.clear();
+                app.selected_badge_counselor = None;
                 app.badges_requirement_selection = 0;
             } else {
                 app.search_query.clear();
@@ -422,6 +424,7 @@ async fn handle_scouts_input(app: &mut App, key: KeyEvent) -> Result<()> {
             app.viewing_requirements = false;
             app.selected_rank_requirements.clear();
             app.selected_badge_requirements.clear();
+            app.selected_badge_counselor = None;
             app.advancement_badge_selection = 0;
             // Always load progress (will use cache if available)
             if let Some(uid) = user_id {
@@ -444,6 +447,7 @@ async fn handle_scouts_input(app: &mut App, key: KeyEvent) -> Result<()> {
                 app.viewing_requirements = false;
                 app.selected_rank_requirements.clear();
                 app.selected_badge_requirements.clear();
+                app.selected_badge_counselor = None;
                 // Start at top (Eagle) since display is reversed
                 app.advancement_rank_selection = app.selected_youth_ranks.len().saturating_sub(1);
                 // Always load progress (will use cache if available)
@@ -533,6 +537,7 @@ async fn handle_scouts_input(app: &mut App, key: KeyEvent) -> Result<()> {
                     app.selected_youth_leadership.clear();
                     app.selected_rank_requirements.clear();
                     app.selected_badge_requirements.clear();
+                    app.selected_badge_counselor = None;
                     app.viewing_requirements = false;
                     app.advancement_rank_selection = app.selected_youth_ranks.len().saturating_sub(1);
                     app.advancement_badge_selection = 0;
@@ -567,6 +572,7 @@ async fn handle_scouts_input(app: &mut App, key: KeyEvent) -> Result<()> {
                     app.selected_youth_leadership.clear();
                     app.selected_rank_requirements.clear();
                     app.selected_badge_requirements.clear();
+                    app.selected_badge_counselor = None;
                     app.viewing_requirements = false;
                     app.advancement_rank_selection = app.selected_youth_ranks.len().saturating_sub(1);
                     app.advancement_badge_selection = 0;
@@ -956,6 +962,7 @@ async fn handle_badges_input(app: &mut App, key: KeyEvent) -> Result<()> {
                         // Exit requirements view but stay in right panel
                         app.badges_viewing_requirements = false;
                         app.selected_badge_requirements.clear();
+                        app.selected_badge_counselor = None;
                         app.badges_requirement_selection = 0;
                         app.badges_scout_selection = 0;
                     }

@@ -377,11 +377,11 @@ fn render_login_overlay(frame: &mut Frame, app: &App) {
         Span::raw("]"),
     ]));
 
-    // Error message
-    if let Some(ref error) = app.login_error {
+    // Error message (centered)
+    if app.login_error.is_some() {
         lines.push(Line::from(""));
         lines.push(Line::from(Span::styled(
-            format!(" {}", error),
+            "                 LOGIN FAILED",
             styles::error_style(),
         )));
     }

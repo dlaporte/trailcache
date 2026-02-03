@@ -570,8 +570,8 @@ fn render_badges_view(frame: &mut Frame, app: &App, selected: Option<&&crate::mo
 
 fn render_badge_requirements_view(frame: &mut Frame, app: &App, selected: Option<&&crate::models::Youth>, area: Rect, focused: bool) {
     let sorted_badges = get_sorted_badges(&app.selected_youth_badges);
-    let badge_name = sorted_badges
-        .get(app.advancement_badge_selection)
+    let selected_badge = sorted_badges.get(app.advancement_badge_selection);
+    let badge_name = selected_badge
         .map(|b| b.name.clone())
         .unwrap_or_else(|| "Merit Badge".to_string());
 
@@ -599,6 +599,18 @@ fn render_badge_requirements_view(frame: &mut Frame, app: &App, selected: Option
     if app.selected_badge_requirements.is_empty() {
         lines.push(Line::from(Span::styled("Loading requirements...", styles::muted_style())));
     } else {
+        // Show counselor info if available (from the detail fetch)
+        if let Some(ref counselor) = app.selected_badge_counselor {
+            let name = counselor.full_name();
+            if !name.is_empty() {
+                lines.push(Line::from(vec![
+                    Span::styled("Counselor: ", styles::muted_style()),
+                    Span::styled(name, styles::highlight_style()),
+                ]));
+                lines.push(Line::from(""));
+            }
+        }
+
         // Count completed
         let completed = app.selected_badge_requirements.iter().filter(|r| r.is_completed()).count();
         let total = app.selected_badge_requirements.len();

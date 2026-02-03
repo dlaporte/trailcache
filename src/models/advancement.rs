@@ -162,6 +162,8 @@ pub struct MeritBadgeWithRequirements {
     pub version: Option<String>,
     #[serde(default)]
     pub requirements: Vec<MeritBadgeRequirement>,
+    #[serde(rename = "assignedCounselorUser")]
+    pub assigned_counselor: Option<CounselorInfo>,
 }
 
 /// Merit badge from the catalog endpoint (/advancements/meritBadges)
@@ -354,6 +356,41 @@ impl RankRequirement {
     }
 }
 
+/// Merit badge counselor information from API
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct CounselorInfo {
+    #[serde(rename = "userId")]
+    pub user_id: Option<String>,
+    #[serde(rename = "firstName")]
+    pub first_name: Option<String>,
+    #[serde(rename = "middleName")]
+    pub middle_name: Option<String>,
+    #[serde(rename = "lastName")]
+    pub last_name: Option<String>,
+    #[serde(rename = "homePhone")]
+    pub home_phone: Option<String>,
+    #[serde(rename = "mobilePhone")]
+    pub mobile_phone: Option<String>,
+    pub email: Option<String>,
+    pub picture: Option<String>,
+}
+
+impl CounselorInfo {
+    /// Get the counselor's full name
+    pub fn full_name(&self) -> String {
+        let first = self.first_name.as_deref().unwrap_or("");
+        let last = self.last_name.as_deref().unwrap_or("");
+        format!("{} {}", first, last).trim().to_string()
+    }
+
+    /// Get the best phone number (prefer mobile, fall back to home)
+    pub fn phone(&self) -> Option<&str> {
+        self.mobile_phone.as_deref()
+            .filter(|s| !s.is_empty())
+            .or_else(|| self.home_phone.as_deref().filter(|s| !s.is_empty()))
+    }
+}
+
 // Merit badge from API (flat array)
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MeritBadgeProgress {
@@ -370,6 +407,8 @@ pub struct MeritBadgeProgress {
     #[serde(rename = "isEagleRequired")]
     pub is_eagle_required: Option<bool>,
     pub status: Option<String>,
+    #[serde(rename = "assignedCounselorUser")]
+    pub assigned_counselor: Option<CounselorInfo>,
     // Keep old fields for compatibility
     #[serde(skip)]
     pub requirements_completed: Option<i32>,
@@ -392,6 +431,13 @@ impl MeritBadgeProgress {
 
     pub fn progress_percent(&self) -> Option<i32> {
         self.percent_completed.map(|p| (p * 100.0) as i32)
+    }
+
+    /// Check if this badge has an assigned counselor
+    pub fn has_counselor(&self) -> bool {
+        self.assigned_counselor.as_ref()
+            .map(|c| !c.full_name().is_empty())
+            .unwrap_or(false)
     }
 }
 
@@ -551,5 +597,49 @@ mod tests {
         assert_eq!(award.name, Some("Honor Medal".to_string()));
         assert_eq!(award.status, Some("Started".to_string()));
         assert_eq!(award.awarded, Some(false));
+    }
+
+    #[test]
+    fn test_merit_badge_with_counselor() {
+        let json = r#"{
+            "id": 24,
+            "name": "Citizenship in the Community",
+            "dateStarted": "2024-12-01",
+            "percentCompleted": 0.43,
+            "isEagleRequired": true,
+            "status": "Started",
+            "assignedCounselorUser": {
+                "userId": "1234567",
+                "firstName": "John",
+                "middleName": "Q",
+                "lastName": "Smith",
+                "homePhone": "5551234567",
+                "mobilePhone": "5559876543",
+                "email": "john.smith@example.com",
+                "picture": null
+            }
+        }"#;
+        let badge: MeritBadgeProgress = serde_json::from_str(json).expect("Failed to parse");
+        assert_eq!(badge.id, 24);
+        assert_eq!(badge.name, "Citizenship in the Community");
+        assert!(badge.has_counselor());
+
+        let counselor = badge.assigned_counselor.as_ref().unwrap();
+        assert_eq!(counselor.full_name(), "John Smith");
+        assert_eq!(counselor.phone(), Some("5559876543"));
+        assert_eq!(counselor.email.as_deref(), Some("john.smith@example.com"));
+    }
+
+    #[test]
+    fn test_merit_badge_without_counselor() {
+        let json = r#"{
+            "id": 25,
+            "name": "Swimming",
+            "status": "Started"
+        }"#;
+        let badge: MeritBadgeProgress = serde_json::from_str(json).expect("Failed to parse");
+        assert_eq!(badge.id, 25);
+        assert!(!badge.has_counselor());
+        assert!(badge.assigned_counselor.is_none());
     }
 }
