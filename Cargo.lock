@@ -2060,7 +2060,7 @@ dependencies = [
 
 [[package]]
 name = "trailcache"
-version = "0.2.8"
+version = "0.2.10"
 dependencies = [
  "anyhow",
  "argon2",
