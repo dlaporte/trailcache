@@ -1,6 +1,6 @@
 [package]
 name = "trailcache"
-version = "0.2.10"
+version = "0.2.11"
 edition = "2021"
 description = "A blazing-fast TUI for Scout troop management - works offline"
 authors = ["David LaPorte"]
