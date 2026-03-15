@@ -70,8 +70,8 @@ jobs:
 
       - name: Upload .dmg to GitHub Release
         run: |
-          # Wait briefly for the TUI release workflow to create the GitHub Release
-          for i in 1 2 3 4 5; do
+          # Wait for the TUI release workflow to create the GitHub Release
+          for i in 1 2 3 4 5 6 7 8 9 10; do
             if gh release view "${{ github.ref_name }}" > /dev/null 2>&1; then
               break
             fi
@@ -79,7 +79,14 @@ jobs:
             sleep 30
           done
 
-          DMG=$(find crates/trailcache-gui/src-tauri/target/release/bundle/dmg -name "*.dmg" | head -1)
+          # Create the release ourselves if the TUI workflow hasn't yet
+          if ! gh release view "${{ github.ref_name }}" > /dev/null 2>&1; then
+            echo "Creating release ${{ github.ref_name }}"
+            gh release create "${{ github.ref_name }}" --title "${{ github.ref_name }}" --generate-notes
+          fi
+
+          # Find .dmg in workspace target dir (not crate-local)
+          DMG=$(find target/release/bundle/dmg -name "*.dmg" 2>/dev/null | head -1)
           if [ -n "$DMG" ]; then
             gh release upload "${{ github.ref_name }}" "$DMG" --clobber
           else
