@@ -14,6 +14,11 @@
 .DS_Store
 Thumbs.db
 
+# GUI frontend
+node_modules/
+crates/trailcache-gui/build/
+crates/trailcache-gui/.svelte-kit/
+
 # Environment
 .env
 .env.local

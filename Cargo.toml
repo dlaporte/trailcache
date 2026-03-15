@@ -1,22 +1,24 @@
-[package]
-name = "trailcache"
+[workspace]
+members = [
+    "crates/trailcache-core",
+    "crates/trailcache-tui",
+    "crates/trailcache-gui/src-tauri",
+]
+resolver = "2"
+
+[workspace.package]
 version = "0.2.12"
 edition = "2021"
-description = "A blazing-fast TUI for Scout troop management - works offline"
 authors = ["David LaPorte"]
 repository = "https://github.com/dlaporte/trailcache"
 license = "MIT"
 
-[dependencies]
-# TUI
-ratatui = "0.29"
-crossterm = "0.28"
-
-# Async runtime (only features we need for smaller binary)
+[workspace.dependencies]
+# Async runtime
 tokio = { version = "1", features = ["rt-multi-thread", "sync", "macros"] }
 
-# HTTP client
-reqwest = { version = "0.12", features = ["json"] }
+# HTTP client (rustls-tls for mobile compatibility)
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
 
 # Serialization
 serde = { version = "1", features = ["derive"] }
@@ -27,7 +29,7 @@ keyring = "3"
 
 # Encryption
 chacha20poly1305 = "0.10"
-argon2 = "0.5"  # Key derivation from password
+argon2 = "0.5"
 rand = "0.8"
 
 # Date/time handling
@@ -51,15 +53,15 @@ dirs = "5"
 # Environment file support
 dotenvy = "0.15"
 
-# Password input
-rpassword = "7"
+# TypeScript type generation
+ts-rs = "10"
 
+# The profile that 'dist' will build with
 [profile.release]
 lto = true
 codegen-units = 1
 strip = true
 
-# The profile that 'dist' will build with
 [profile.dist]
 inherits = "release"
 lto = "thin"

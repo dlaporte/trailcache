@@ -1,0 +1,49 @@
+[package]
+name = "trailcache-tui"
+description = "A blazing-fast TUI for Scout troop management - works offline"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+repository.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "trailcache"
+path = "src/main.rs"
+
+[dependencies]
+trailcache-core = { path = "../trailcache-core" }
+
+# TUI
+ratatui = "0.29"
+crossterm = "0.28"
+
+# Async runtime
+tokio = { workspace = true }
+
+# HTTP client (for dump_requirements CLI utility)
+reqwest = { workspace = true }
+
+# Serialization
+serde = { workspace = true }
+serde_json = { workspace = true }
+
+# Date/time handling
+chrono = { workspace = true }
+
+# Error handling
+anyhow = { workspace = true }
+
+# Logging
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+tracing-appender = { workspace = true }
+
+# Async utilities
+futures = { workspace = true }
+
+# Environment file support
+dotenvy = { workspace = true }
+
+# Password input
+rpassword = "7"
