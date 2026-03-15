@@ -30,7 +30,10 @@ Trailcache loads your data in under a second. Keyboard-driven navigation means y
 
 ### Cross-Platform
 
-Runs natively on macOS, Windows, and Linux. Same experience everywhere.
+Runs everywhere your troop goes:
+- **Terminal (TUI)** — macOS, Windows, Linux
+- **Desktop (GUI)** — macOS (.dmg)
+- **Mobile** — iOS and Android
 
 ---
 
@@ -69,30 +72,34 @@ Picture this: You're at summer camp. It's merit badge midway. Scouts are asking 
 
 ## INSTALLATION
 
-### From crates.io (Recommended)
+### Desktop App (GUI)
 
+**macOS:** Download the `.dmg` from the [GitHub Releases](https://github.com/dlaporte/trailcache/releases) page.
+
+### Mobile
+
+**iOS / Android:** Coming soon to the App Store and Google Play.
+
+### Terminal App (TUI)
+
+**From crates.io (Recommended):**
 ```bash
 cargo install trailcache-tui
 ```
 
-### One-Line Install Script
-
-**macOS / Linux:**
+**One-line install script — macOS / Linux:**
 ```bash
 curl --proto '=https' --tlsv1.2 -LsSf https://github.com/dlaporte/trailcache/releases/latest/download/trailcache-installer.sh | sh
 ```
 
-**Windows (PowerShell):**
+**One-line install script — Windows (PowerShell):**
 ```powershell
 irm https://github.com/dlaporte/trailcache/releases/latest/download/trailcache-installer.ps1 | iex
 ```
 
-### Pre-built Binaries
+**Pre-built binaries:** Download for your platform from [GitHub Releases](https://github.com/dlaporte/trailcache/releases).
 
-Download the latest release for your platform from the [GitHub Releases](https://github.com/dlaporte/trailcache/releases) page.
-
-### From Source
-
+**From source:**
 ```bash
 git clone https://github.com/dlaporte/trailcache.git
 cd trailcache
