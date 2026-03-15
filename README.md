@@ -69,7 +69,13 @@ Picture this: You're at summer camp. It's merit badge midway. Scouts are asking 
 
 ## INSTALLATION
 
-### The Quick Way (Recommended)
+### From crates.io (Recommended)
+
+```bash
+cargo install trailcache-tui
+```
+
+### One-Line Install Script
 
 **macOS / Linux:**
 ```bash
@@ -81,12 +87,16 @@ curl --proto '=https' --tlsv1.2 -LsSf https://github.com/dlaporte/trailcache/rel
 irm https://github.com/dlaporte/trailcache/releases/latest/download/trailcache-installer.ps1 | iex
 ```
 
+### Pre-built Binaries
+
+Download the latest release for your platform from the [GitHub Releases](https://github.com/dlaporte/trailcache/releases) page.
+
 ### From Source
 
 ```bash
 git clone https://github.com/dlaporte/trailcache.git
 cd trailcache
-cargo build --release
+cargo build --release -p trailcache-tui
 ./target/release/trailcache
 ```
 
