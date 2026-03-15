@@ -4727,7 +4727,7 @@ dependencies = [
 
 [[package]]
 name = "trailcache-core"
-version = "0.3.2"
+version = "0.3.3"
 dependencies = [
  "anyhow",
  "argon2",
@@ -4748,7 +4748,7 @@ dependencies = [
 
 [[package]]
 name = "trailcache-gui"
-version = "0.3.2"
+version = "0.3.3"
 dependencies = [
  "anyhow",
  "chrono",
@@ -4767,7 +4767,7 @@ dependencies = [
 
 [[package]]
 name = "trailcache-tui"
-version = "0.3.2"
+version = "0.3.3"
 dependencies = [
  "anyhow",
  "chrono",

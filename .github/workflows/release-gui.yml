@@ -42,12 +42,17 @@ jobs:
           security create-keychain -p "$KEYCHAIN_PASSWORD" $KEYCHAIN_PATH
           security set-keychain-settings -lut 21600 $KEYCHAIN_PATH
           security unlock-keychain -p "$KEYCHAIN_PASSWORD" $KEYCHAIN_PATH
-          security import certificate.p12 -k $KEYCHAIN_PATH -P "$APPLE_CERTIFICATE_PASSWORD" -T /usr/bin/codesign -T /usr/bin/security
+          security import certificate.p12 -k $KEYCHAIN_PATH -P "$APPLE_CERTIFICATE_PASSWORD" -T /usr/bin/codesign -T /usr/bin/security -A
           security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$KEYCHAIN_PASSWORD" $KEYCHAIN_PATH
           security list-keychains -d user -s $KEYCHAIN_PATH
           security default-keychain -s $KEYCHAIN_PATH
-          # Verify the identity was imported
+          # Debug: show what was imported
+          echo "=== Identities in keychain ==="
           security find-identity -v -p codesigning $KEYCHAIN_PATH
+          echo "=== Keychain search list ==="
+          security list-keychains -d user
+          echo "=== Test codesign access ==="
+          security find-identity -v -p codesigning
           rm certificate.p12
 
       - name: Build Tauri app
@@ -57,7 +62,11 @@ jobs:
           APPLE_ID: ${{ secrets.APPLE_ID }}
           APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
-        run: npm run tauri build
+          KEYCHAIN_PASSWORD: ${{ secrets.KEYCHAIN_PASSWORD }}
+        run: |
+          # Ensure keychain is still unlocked before build
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" $RUNNER_TEMP/build.keychain-db
+          npm run tauri build
 
       - name: Upload .dmg to GitHub Release
         run: |
