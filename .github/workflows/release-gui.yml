@@ -43,6 +43,10 @@ jobs:
           security unlock-keychain -p "$KEYCHAIN_PASSWORD" build.keychain
           security import certificate.p12 -k build.keychain -P "$APPLE_CERTIFICATE_PASSWORD" -T /usr/bin/codesign
           security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$KEYCHAIN_PASSWORD" build.keychain
+          # Add build.keychain to the search list so codesign can find the identity
+          security list-keychains -d user -s build.keychain login.keychain-db
+          # Verify the identity was imported
+          security find-identity -v build.keychain
           rm certificate.p12
 
       - name: Build Tauri app
