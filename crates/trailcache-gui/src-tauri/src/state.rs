@@ -18,8 +18,17 @@ pub struct GuiAppState {
 }
 
 impl GuiAppState {
-    pub fn new() -> anyhow::Result<Self> {
-        let config = Config::load()?;
+    pub fn new(config_dir: Option<PathBuf>, cache_base_dir: Option<PathBuf>) -> anyhow::Result<Self> {
+        let mut config = if let Some(ref dir) = config_dir {
+            Config::load_from(dir.clone())?
+        } else {
+            Config::load()?
+        };
+
+        if let Some(dir) = cache_base_dir {
+            config.set_cache_dir(dir);
+        }
+
         let cache_dir = config.cache_dir().unwrap_or_else(|_| PathBuf::from("./cache"));
 
         let api_client = ApiClient::new()?;

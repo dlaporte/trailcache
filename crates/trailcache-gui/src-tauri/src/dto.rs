@@ -166,6 +166,8 @@ pub struct AdultDisplay {
     pub membership_status: Option<String>,
     pub membership_style: Option<String>,
     pub membership_sort_date: Option<String>,
+    pub address_line1: Option<String>,
+    pub address_line2: Option<String>,
     // Raw fields
     #[ts(type = "number | null")]
     pub user_id: Option<i64>,
@@ -224,6 +226,17 @@ impl From<&Adult> for AdultDisplay {
             .and_then(|r| r.registration_expire_dt.clone())
             .map(|d| d[..10.min(d.len())].to_string());
 
+        let addr_line1 = a.primary_address_info.as_ref()
+            .and_then(|addr| addr.address1.clone())
+            .filter(|s| !s.trim().is_empty());
+
+        let addr_line2 = a.primary_address_info.as_ref()
+            .and_then(|addr| {
+                addr.city_state().map(|cs| {
+                    format!("{} {}", cs, addr.zip_code.as_deref().unwrap_or("")).trim().to_string()
+                })
+            });
+
         Self {
             display_name: a.display_name(),
             role: a.role(),
@@ -236,6 +249,8 @@ impl From<&Adult> for AdultDisplay {
             membership_status,
             membership_style,
             membership_sort_date,
+            address_line1: addr_line1,
+            address_line2: addr_line2,
             user_id: a.user_id,
             first_name: a.first_name.clone(),
             last_name: a.last_name.clone(),

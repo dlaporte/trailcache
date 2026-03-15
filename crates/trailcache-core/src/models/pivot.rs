@@ -84,10 +84,17 @@ pub fn group_youth_by_rank(
                     rank: Some(rank.clone()),
                 });
         } else {
+            // No completed/awarded rank — Crossover scout.
+            // Store their lowest in-progress rank so drill-down can
+            // show requirement completion status.
+            let lowest_rank = ranks
+                .iter()
+                .min_by_key(|r| r.sort_order())
+                .cloned();
             crossover.push(RankGroupEntry {
                 user_id: uid,
                 display_name: y.display_name(),
-                rank: None,
+                rank: lowest_rank,
             });
         }
     }

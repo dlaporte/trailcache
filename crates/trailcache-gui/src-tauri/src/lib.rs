@@ -2,17 +2,18 @@ mod commands;
 pub mod dto;
 mod state;
 
+use tauri::Manager;
 use state::GuiAppState;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     // Initialize tracing so trailcache-core log output appears on stderr during dev
+    #[cfg(not(any(target_os = "android", target_os = "ios")))]
     if cfg!(debug_assertions) {
         tracing_subscriber::fmt()
             .with_env_filter("trailcache_core=debug,warn")
             .init();
     }
-    let app_state = GuiAppState::new().expect("Failed to initialize app state");
 
     #[allow(unused_mut)]
     let mut builder = tauri::Builder::default();
@@ -23,7 +24,14 @@ pub fn run() {
     }
 
     builder
-        .manage(app_state)
+        .setup(|app| {
+            let config_dir = app.path().app_config_dir().ok();
+            let cache_dir = app.path().app_cache_dir().ok();
+            let app_state = GuiAppState::new(config_dir, cache_dir)
+                .expect("Failed to initialize app state");
+            app.manage(app_state);
+            Ok(())
+        })
         .invoke_handler(tauri::generate_handler![
             // Auth
             commands::login,

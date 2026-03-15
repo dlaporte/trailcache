@@ -74,6 +74,8 @@
 	let statusErrors: string[] = $state([]);
 	let offlineMode = $state(false);
 	let showOfflineModal = $state(false);
+	let showErrors = $state(false);
+	let showStatusModal = $state(false);
 	let confirmQuit = $state(false);
 	let refreshProgress: RefreshProgress | null = $state(null);
 
@@ -118,6 +120,9 @@
 	let eventGuests: EventGuestDisplay[] = $state([]);
 	let loadingEventDetail = $state(false);
 	let eventDetailView = $state<'details' | 'rsvp'>('details');
+
+	// Adult detail
+	let selectedAdult: AdultDisplay | null = $state(null);
 
 	// Pivot tabs (pre-aggregated from backend)
 	let rankPivotData: RankPivotEntry[] = $state([]);
@@ -244,6 +249,10 @@
 				selectedYouth = null;
 				return;
 			}
+			if (selectedAdult) {
+				selectedAdult = null;
+				return;
+			}
 			if (selectedEvent) {
 				selectedEvent = null;
 				return;
@@ -282,6 +291,7 @@
 		commissioners = [];
 		orgProfile = null;
 		selectedYouth = null;
+		selectedAdult = null;
 		selectedEvent = null;
 		pivotDataLoaded = false;
 		rankPivotData = [];
@@ -411,6 +421,11 @@
 			} catch (_) {}
 		}
 		loadingDetail = false;
+	}
+
+	function selectAdult(a: AdultDisplay) {
+		selectedAdult = a;
+		mobileDetailOpen = true;
 	}
 
 	async function viewRankRequirements(rank: RankProgressDisplay) {
@@ -763,6 +778,7 @@
 		} else {
 			mobileDetailOpen = false;
 			selectedYouth = null;
+			selectedAdult = null;
 			selectedEvent = null;
 			selectedPivotRank = null;
 			selectedPivotBadge = null;
@@ -772,7 +788,7 @@
 	// Pull-to-refresh touch handlers
 	function handleTouchStart(e: TouchEvent) {
 		const target = e.target as HTMLElement;
-		const scrollParent = target.closest('.list-panel, .single-panel');
+		const scrollParent = target.closest('.list-panel');
 		if (scrollParent && scrollParent.scrollTop > 0) return;
 		pullStartY = e.touches[0].clientY;
 		pulling = true;
@@ -1135,7 +1151,7 @@
 													{#each [...youthRanks].sort((a, b) => b.sort_order - a.sort_order) as r}
 														<tr
 															class="clickable-row"
-															ondblclick={() => viewRankRequirements(r)}
+															onclick={() => viewRankRequirements(r)}
 															title="View requirements"
 														>
 															<td>{r.rank_name}</td>
@@ -1187,7 +1203,7 @@
 													{#each [...youthBadges].sort((a, b) => { const statusOrder = (x: typeof a) => x.is_awarded ? 2 : x.is_completed ? 1 : 0; const diff = statusOrder(a) - statusOrder(b); if (diff !== 0) return diff; if (!a.is_completed && !a.is_awarded) return (b.percent_completed ?? 0) - (a.percent_completed ?? 0); return b.sort_date.localeCompare(a.sort_date); }) as b}
 														<tr
 															class="clickable-row"
-															ondblclick={() => viewBadgeRequirements(b)}
+															onclick={() => viewBadgeRequirements(b)}
 															title="View requirements"
 														>
 															<td>
@@ -1422,8 +1438,8 @@
 											eventSortAsc
 										)}
 									</th>
-									<th onclick={() => toggleEventSort('location')} class="sortable">Location{sortIndicator('location', eventSortColumn, eventSortAsc)}</th>
-									<th onclick={() => toggleEventSort('derived_type')} class="sortable">Type{sortIndicator('derived_type', eventSortColumn, eventSortAsc)}</th>
+									<th onclick={() => toggleEventSort('location')} class="sortable hide-mobile">Location{sortIndicator('location', eventSortColumn, eventSortAsc)}</th>
+									<th onclick={() => toggleEventSort('derived_type')} class="sortable hide-mobile">Type{sortIndicator('derived_type', eventSortColumn, eventSortAsc)}</th>
 								</tr>
 							</thead>
 							<tbody>
@@ -1433,9 +1449,9 @@
 										onclick={() => selectEvent(e)}
 									>
 										<td>{e.name}</td>
-										<td>{e.formatted_date}</td>
-										<td>{e.location || ''}</td>
-										<td>{e.derived_type}</td>
+										<td class="event-date">{e.formatted_date}</td>
+										<td class="hide-mobile">{e.location || ''}</td>
+										<td class="hide-mobile">{e.derived_type}</td>
 									</tr>
 								{/each}
 								{#if filteredEvents.length === 0}
@@ -1509,7 +1525,9 @@
 								</div>
 							{:else}
 								<!-- RSVP View -->
-								{#if loadingEventDetail}
+								{#if offlineMode}
+									<p class="empty-message">RSVP data is not available in offline mode</p>
+								{:else if loadingEventDetail}
 									<p class="loading-text">Loading RSVP data...</p>
 								{:else if eventGuests.length === 0}
 									<p class="empty-message">No RSVP data available</p>
@@ -1597,7 +1615,7 @@
 											onclick={() => { selectedPivotRank = r.rank_name; mobileDetailOpen = true; pivotRankReqsScout = null; pivotRankReqs = []; }}
 										>
 											<td>{r.rank_name}</td>
-											<td>{r.count}</td>
+											<td class="pivot-count">{r.count}</td>
 										</tr>
 									{/each}
 								</tbody>
@@ -1642,7 +1660,7 @@
 									</thead>
 									<tbody>
 										{#each selectedRankScouts as s}
-											<tr class="clickable-row" ondblclick={() => viewPivotRankRequirements(s)} title="Double-click to view requirements">
+											<tr class="clickable-row" onclick={() => viewPivotRankRequirements(s)} title="View requirements">
 												<td>{s.display_name}</td>
 												<td>
 													{#if s.is_awarded}
@@ -1700,7 +1718,7 @@
 														title="Eagle required">E</span
 													>{/if}
 											</td>
-											<td>{b.count}</td>
+											<td class="pivot-count">{b.count}</td>
 										</tr>
 									{/each}
 								</tbody>
@@ -1754,7 +1772,7 @@
 									</thead>
 									<tbody>
 										{#each selectedBadgeScouts as s}
-											<tr class="clickable-row" ondblclick={() => viewPivotBadgeRequirements(s)} title="Double-click to view requirements">
+											<tr class="clickable-row" onclick={() => viewPivotBadgeRequirements(s)} title="View requirements">
 												<td>{s.display_name}</td>
 												<td>
 													{#if s.is_awarded}
@@ -1783,52 +1801,126 @@
 				<!-- ADULTS TAB                                                   -->
 				<!-- ============================================================ -->
 			{:else if activeTab === 'adults'}
-				<div class="single-panel">
-					<table class="data-table">
-						<thead>
-							<tr>
-								<th
-									onclick={() => toggleAdultSort('last_name')}
-									class="sortable"
-								>
-									Name{sortIndicator(
-										'last_name',
-										adultSortColumn,
-										adultSortAsc
-									)}
-								</th>
-								<th
-									onclick={() => toggleAdultSort('position')}
-									class="sortable"
-								>
-									Position{sortIndicator(
-										'position',
-										adultSortColumn,
-										adultSortAsc
-									)}
-								</th>
-								<th>Phone</th>
-								<th>Email</th>
-							</tr>
-						</thead>
-						<tbody>
-							{#each filteredAdults as a}
+				<div class="split-view">
+					<div class="list-panel" class:mobile-hidden={mobileDetailOpen}>
+						<table class="data-table">
+							<thead>
 								<tr>
-									<td>{a.display_name}</td>
-									<td>{a.role}</td>
-									<td>{a.phone || ''}</td>
-									<td>{a.email || ''}</td>
+									<th
+										onclick={() => toggleAdultSort('last_name')}
+										class="sortable"
+									>
+										Name{sortIndicator(
+											'last_name',
+											adultSortColumn,
+											adultSortAsc
+										)}
+									</th>
+									<th
+										onclick={() => toggleAdultSort('position')}
+										class="sortable"
+									>
+										Position{sortIndicator(
+											'position',
+											adultSortColumn,
+											adultSortAsc
+										)}
+									</th>
 								</tr>
-							{/each}
-							{#if filteredAdults.length === 0}
-								<tr
-									><td colspan="4" class="empty-message"
-										>No adults found</td
-									></tr
-								>
+							</thead>
+							<tbody>
+								{#each filteredAdults as a}
+									<tr
+										class:selected={selectedAdult?.user_id === a.user_id}
+										onclick={() => selectAdult(a)}
+									>
+										<td>{a.display_name}</td>
+										<td>{a.role}</td>
+									</tr>
+								{/each}
+								{#if filteredAdults.length === 0}
+									<tr
+										><td colspan="2" class="empty-message"
+											>No adults found</td
+										></tr
+									>
+								{/if}
+							</tbody>
+						</table>
+					</div>
+
+					<div class="detail-panel" class:mobile-hidden={!mobileDetailOpen}>
+						{#if selectedAdult}
+							<h2 class="detail-title">
+								{selectedAdult.first_name} {selectedAdult.last_name}
+							</h2>
+							{#if selectedAdult.member_id}
+								<div class="detail-meta">
+									<span class="badge badge-muted">BSA ID: {selectedAdult.member_id}</span>
+								</div>
 							{/if}
-						</tbody>
-					</table>
+
+							<section class="detail-section">
+								<h3>Unit Info</h3>
+								<div class="info-grid">
+									<div class="info-item">
+										<span class="info-label">Position</span>
+										<span class="info-value">{selectedAdult.role}</span>
+									</div>
+									{#if selectedAdult.membership_status}
+										<div class="info-item">
+											<span class="info-label">Membership</span>
+											<span class="info-value" class:membership-expired={selectedAdult.membership_style === 'expired'} class:membership-expiring={selectedAdult.membership_style === 'expiring'}>{selectedAdult.membership_status}</span>
+										</div>
+									{/if}
+								</div>
+							</section>
+
+							<section class="detail-section">
+								<h3>Training</h3>
+								<div class="info-grid">
+									{#if selectedAdult.ypt_status}
+										<div class="info-item">
+											<span class="info-label">YPT</span>
+											<span class="info-value" class:status-expired={selectedAdult.ypt_style === 'expired'} class:status-expiring={selectedAdult.ypt_style === 'expiring'} class:status-active={selectedAdult.ypt_style === 'current'}>{selectedAdult.ypt_status}</span>
+										</div>
+									{/if}
+									{#if selectedAdult.position_trained}
+										<div class="info-item">
+											<span class="info-label">Position</span>
+											<span class="info-value" class:status-active={selectedAdult.position_trained === 'Trained'} class:status-expired={selectedAdult.position_trained === 'Not Trained'}>{selectedAdult.position_trained}</span>
+										</div>
+									{/if}
+								</div>
+							</section>
+
+							<section class="detail-section">
+								<h3>Contact</h3>
+								<div class="info-grid">
+									{#if selectedAdult.phone}
+										<div class="info-item">
+											<span class="info-label">Phone</span>
+											<span class="info-value">{selectedAdult.phone}</span>
+										</div>
+									{/if}
+									{#if selectedAdult.email}
+										<div class="info-item">
+											<span class="info-label">Email</span>
+											<span class="info-value">{selectedAdult.email}</span>
+										</div>
+									{/if}
+									{#if selectedAdult.address_line1}
+										<div class="info-item">
+											<span class="info-label">Address</span>
+											<span class="info-value">{selectedAdult.address_line1}{#if selectedAdult.address_line2}<br />{selectedAdult.address_line2}{/if}</span>
+										</div>
+									{/if}
+								</div>
+							</section>
+						{:else}
+							<p class="empty-message">Select an adult to view details</p>
+						{/if}
+					</div>
 				</div>
 
 				<!-- ============================================================ -->
@@ -2052,32 +2144,48 @@
 		<!-- Status Bar -->
 		<footer class="status-bar">
 			<div class="status-left">
-				{#if refreshProgress}
-					<div class="refresh-bar">
-						<div
-							class="refresh-fill"
-							style="width: {(refreshProgress.current / refreshProgress.total) * 100}%"
-						></div>
-					</div>
-				{/if}
-				<span
-					class={statusErrors.length > 0 ? 'status-has-errors' : ''}
-					title={statusErrors.length > 0 ? statusErrors.join('\n') : ''}
-				>{statusMessage}</span>
+				<!-- Desktop: full status text -->
+				<div class="status-desktop">
+					{#if refreshProgress}
+						<div class="refresh-bar">
+							<div
+								class="refresh-fill"
+								style="width: {(refreshProgress.current / refreshProgress.total) * 100}%"
+							></div>
+						</div>
+					{/if}
+					{#if statusErrors.length > 0}
+						<button class="status-error-btn" onclick={() => { showErrors = true; }}>{statusMessage}</button>
+					{:else}
+						<span>{statusMessage}</span>
+					{/if}
 
-				{#if activeTab === 'events' && calendarUrl}
-					<span class="calendar-url">Subscribe: {calendarUrl}</span>
-				{/if}
+					{#if activeTab === 'events' && calendarUrl}
+						<span class="calendar-url">Subscribe: {calendarUrl}</span>
+					{/if}
+				</div>
+				<!-- Mobile: compact tappable status -->
+				<button class="status-mobile" onclick={() => { showStatusModal = true; }}>
+					{#if refreshProgress}
+						Updating ({refreshProgress.current}/{refreshProgress.total})...
+					{:else if statusErrors.length > 0}
+						<span class="status-error-dot"></span> {statusErrors.length} error{statusErrors.length === 1 ? '' : 's'}
+					{:else}
+						Status
+					{/if}
+				</button>
 			</div>
 			{#if offlineMode}<span class="offline-indicator">OFFLINE</span>{/if}
-			{#if cacheAges}
-				<span class="cache-info">
+			<span class="cache-info">
+				{#if cacheAges}
 					{#if cacheAges.youth}Roster: {cacheAges.youth}{/if}
 					{#if cacheAges.events}&middot; Events: {cacheAges.events}{/if}
 					{#if cacheAges.advancement}&middot; Advancement: {cacheAges.advancement}{/if}
 					{#if !cacheAges.youth && !cacheAges.events && !cacheAges.advancement}No cache{/if}
-				</span>
-			{/if}
+				{:else}
+					No cache
+				{/if}
+			</span>
 		</footer>
 	</div>
 {/if}
@@ -2106,6 +2214,74 @@
 			<h1 class="login-title">Quit Trailcache?</h1>
 			<button class="login-button" onclick={confirmAndQuit}>Quit</button>
 			<button class="login-button modal-cancel" onclick={() => (confirmQuit = false)}>Cancel</button>
+		</div>
+	</div>
+{/if}
+
+<!-- Errors Modal -->
+{#if showErrors && statusErrors.length > 0}
+	<div class="modal-overlay" role="dialog" aria-modal="true" onclick={() => (showErrors = false)} onkeydown={(e) => { if (e.key === 'Escape') showErrors = false; }} tabindex="-1">
+		<div class="login-box modal-box" role="none" onclick={(e) => e.stopPropagation()}>
+			<h1 class="login-title">Errors</h1>
+			<ul class="error-list">
+				{#each statusErrors as err}
+					<li>{err}</li>
+				{/each}
+			</ul>
+			<button class="login-button modal-cancel" onclick={() => (showErrors = false)}>Close</button>
+		</div>
+	</div>
+{/if}
+
+<!-- Status Detail Modal (mobile) -->
+{#if showStatusModal}
+	<div class="modal-overlay" role="dialog" aria-modal="true" onclick={() => (showStatusModal = false)} onkeydown={(e) => { if (e.key === 'Escape') showStatusModal = false; }} tabindex="-1">
+		<div class="login-box modal-box" role="none" onclick={(e) => e.stopPropagation()}>
+			<h1 class="login-title">Status</h1>
+
+			<div class="status-modal-content">
+				{#if refreshProgress}
+					<div class="status-modal-section">
+						<strong>Updating</strong>
+						<div class="refresh-bar" style="width: 100%; margin: 0.5rem 0;">
+							<div class="refresh-fill" style="width: {(refreshProgress.current / refreshProgress.total) * 100}%"></div>
+						</div>
+						<span>{refreshProgress.step} ({refreshProgress.current}/{refreshProgress.total})</span>
+					</div>
+				{/if}
+
+				<div class="status-modal-section">
+					<strong>Data</strong>
+					<div>{youth.length} scouts</div>
+					<div>{adults.length} adults</div>
+					<div>{events.length} events</div>
+				</div>
+
+				<div class="status-modal-section">
+					<strong>Cache</strong>
+					{#if cacheAges}
+						{#if cacheAges.youth}<div>Roster: {cacheAges.youth}</div>{/if}
+						{#if cacheAges.events}<div>Events: {cacheAges.events}</div>{/if}
+						{#if cacheAges.advancement}<div>Advancement: {cacheAges.advancement}</div>{/if}
+						{#if !cacheAges.youth && !cacheAges.events && !cacheAges.advancement}<div>No cache</div>{/if}
+					{:else}
+						<div>No cache</div>
+					{/if}
+				</div>
+
+				{#if statusErrors.length > 0}
+					<div class="status-modal-section">
+						<strong>Errors ({statusErrors.length})</strong>
+						<ul class="error-list">
+							{#each statusErrors as err}
+								<li>{err}</li>
+							{/each}
+						</ul>
+					</div>
+				{/if}
+			</div>
+
+			<button class="login-button modal-cancel" onclick={() => (showStatusModal = false)}>Close</button>
 		</div>
 	</div>
 {/if}
@@ -2312,8 +2488,8 @@
 	}
 
 	.icon-button.offline-active {
-		color: #ef4444;
-		border-color: #ef4444;
+		color: var(--text-muted);
+		border-color: var(--border);
 	}
 
 	/* ================================================================ */
@@ -2365,10 +2541,35 @@
 	/* Status Bar Indicators                                            */
 	/* ================================================================ */
 
-	.status-has-errors {
+	.status-error-btn {
+		background: none;
+		border: none;
 		color: #ef4444;
-		cursor: help;
+		font: inherit;
+		cursor: pointer;
 		text-decoration: underline dotted;
+		padding: 0;
+	}
+
+	.error-list {
+		text-align: left;
+		list-style: none;
+		margin: 0.75rem 0 1rem;
+		padding: 0;
+		max-height: 300px;
+		overflow-y: auto;
+	}
+
+	.error-list li {
+		color: var(--text-muted);
+		font-size: 0.8rem;
+		padding: 0.3rem 0;
+		border-bottom: 1px solid var(--border);
+		word-break: break-word;
+	}
+
+	.error-list li:last-child {
+		border-bottom: none;
 	}
 
 	.offline-indicator {
@@ -2400,12 +2601,6 @@
 	.detail-panel {
 		overflow-y: auto;
 		padding: 1rem;
-	}
-
-	.single-panel {
-		overflow-y: auto;
-		height: 100%;
-		padding: 0;
 	}
 
 	.unit-column {
@@ -3062,6 +3257,51 @@
 		margin-left: 0.5rem;
 	}
 
+	/* Desktop shows full status, mobile shows compact button */
+	.status-desktop {
+		display: flex;
+		align-items: center;
+		gap: 0.5rem;
+	}
+
+	.status-mobile {
+		display: none;
+		background: none;
+		border: none;
+		color: var(--text-muted);
+		font-size: 0.7rem;
+		padding: 0.2rem 0.4rem;
+		cursor: pointer;
+		text-decoration: underline;
+		text-decoration-style: dotted;
+	}
+
+	.status-error-dot {
+		display: inline-block;
+		width: 6px;
+		height: 6px;
+		border-radius: 50%;
+		background: var(--error, #e74c3c);
+		vertical-align: middle;
+	}
+
+	.status-modal-content {
+		text-align: left;
+		font-size: 0.85rem;
+		color: var(--text);
+		margin: 0.5rem 0;
+	}
+
+	.status-modal-section {
+		margin-bottom: 0.75rem;
+	}
+
+	.status-modal-section strong {
+		display: block;
+		margin-bottom: 0.25rem;
+		color: var(--text-bright, #fff);
+	}
+
 	/* ================================================================ */
 	/* Pull-to-Refresh                                                  */
 	/* ================================================================ */
@@ -3149,8 +3389,26 @@
 			display: none !important;
 		}
 
+		.unit-column {
+			display: contents;
+		}
+
+		.split-view {
+			overflow-y: auto;
+		}
+
 		.hide-mobile {
 			display: none !important;
+		}
+
+		.pivot-count {
+			width: 3rem;
+			text-align: right;
+		}
+
+		.event-date {
+			white-space: nowrap;
+			text-align: right;
 		}
 
 
@@ -3165,8 +3423,8 @@
 
 		/* Top bar: compact */
 		.top-bar {
-			padding: 0 0.5rem;
-			height: 44px;
+			padding: env(safe-area-inset-top, 0) 0.5rem 0;
+			height: calc(44px + env(safe-area-inset-top, 0));
 		}
 
 		.app-name {
@@ -3174,8 +3432,7 @@
 		}
 
 		.search-input {
-			width: 120px;
-			font-size: 16px; /* prevents iOS zoom */
+			display: none;
 		}
 
 		.icon-button {
@@ -3193,7 +3450,6 @@
 			background: var(--bg-surface);
 			border-top: 1px solid var(--border);
 			flex-shrink: 0;
-			padding-bottom: env(safe-area-inset-bottom, 0);
 		}
 
 		.bottom-tab {
@@ -3259,10 +3515,22 @@
 			grid-template-columns: 1fr;
 		}
 
-		/* Status bar: hide cache details on very small screens */
+		/* Status bar: compact on mobile */
 		.status-bar {
-			padding: 0.3rem 0.5rem;
+			padding: 0.3rem 0.5rem env(safe-area-inset-bottom, 0);
 			font-size: 0.7rem;
+		}
+
+		.status-desktop {
+			display: none;
+		}
+
+		.status-mobile {
+			display: inline;
+		}
+
+		.cache-info {
+			display: none;
 		}
 
 		/* Back button: larger tap target */

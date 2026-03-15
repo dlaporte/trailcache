@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 #[cfg_attr(feature = "ts", ts(export))]
 pub struct Patrol {
     #[serde(rename = "subUnitGuid")]
-    pub guid: String,
+    pub guid: Option<String>,
     #[serde(rename = "subUnitName")]
     pub name: String,
     #[serde(rename = "memberCount")]
