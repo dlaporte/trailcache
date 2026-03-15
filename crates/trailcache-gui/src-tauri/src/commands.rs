@@ -6,17 +6,17 @@ use serde::Serialize;
 use tauri::{Emitter, State};
 
 use trailcache_core::auth::CredentialStore;
-use trailcache_core::cache::CacheAges;
+use trailcache_core::cache::{fetch_with_cache, CacheAges};
 use trailcache_core::models::{
-    sort_requirements, AdvancementDashboard, Commissioner, Key3Leaders, MeritBadgeProgress,
-    OrgProfile, Patrol, RankProgress, UnitInfo, Youth,
+    sort_requirements, Adult, AdvancementDashboard, Commissioner, Key3Leaders, LeadershipPosition,
+    MeritBadgeProgress, OrgProfile, Patrol, RankProgress, UnitInfo, Youth,
 };
 
 use crate::dto::{
     AdultDisplay, AwardDisplay, BadgePivotEntry, BadgeRequirementsResponseDisplay,
     EventDisplay, EventGuestDisplay, LeadershipDisplay, MeritBadgeDisplay,
     MeritBadgeRequirementDisplay, ParentDisplay, RankPivotEntry, RankProgressDisplay,
-    RankRequirementDisplay, YouthDisplay,
+    RankRequirementDisplay, YouthBadgesResponse, YouthDisplay,
     build_badge_pivot, build_rank_pivot,
 };
 use crate::state::GuiAppState;
@@ -36,6 +36,38 @@ impl From<anyhow::Error> for CommandError {
 }
 
 type CommandResult<T> = Result<T, CommandError>;
+
+/// Extract a user-friendly message from a login error.
+fn format_login_error(err: &anyhow::Error) -> String {
+    let raw = format!("{:#}", err);
+
+    // Try to extract the human-readable message from JSON error bodies
+    // e.g. {"message":"Invalid request","errors":[{"message":"\"password\" length must be at least 8 characters long",...}]}
+    if let Some(json_start) = raw.find('{') {
+        if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(&raw[json_start..]) {
+            // Try errors[].message first (most specific)
+            if let Some(errors) = parsed.get("errors").and_then(|e| e.as_array()) {
+                let messages: Vec<&str> = errors.iter()
+                    .filter_map(|e| e.get("message").and_then(|m| m.as_str()))
+                    .collect();
+                if !messages.is_empty() {
+                    return format!("Login failed: {}", messages.join("; "));
+                }
+            }
+            // Fall back to top-level message
+            if let Some(msg) = parsed.get("message").and_then(|m| m.as_str()) {
+                return format!("Login failed: {}", msg);
+            }
+        }
+    }
+
+    // Known error patterns without JSON
+    if raw.contains("Unauthorized") {
+        return "Login failed: Invalid username or password".to_string();
+    }
+
+    format!("Login failed: {}", raw)
+}
 
 /// Progress payload emitted during background refresh.
 #[derive(Clone, Serialize)]
@@ -66,7 +98,7 @@ pub async fn login(
 ) -> CommandResult<LoginResponse> {
     let api = state.api_client.lock().await;
     let session_data = api.authenticate(&username, &password).await.map_err(|e| CommandError {
-        message: format!("Login failed: {:#}", e),
+        message: format_login_error(&e),
     })?;
 
     let org_guid = session_data.organization_guid.clone();
@@ -129,6 +161,12 @@ pub async fn get_saved_username(
 }
 
 #[tauri::command]
+pub async fn quit_app(app: tauri::AppHandle) -> CommandResult<()> {
+    app.exit(0);
+    Ok(())
+}
+
+#[tauri::command]
 pub async fn logout(state: State<'_, GuiAppState>) -> CommandResult<()> {
     let mut session = state.session.lock().await;
     session.clear()?;
@@ -155,43 +193,16 @@ pub async fn get_youth(state: State<'_, GuiAppState>) -> CommandResult<Vec<Youth
     let org_guid = config.organization_guid.clone().unwrap_or_default();
     drop(config);
 
-    // In offline mode, return cached data regardless of staleness
-    if offline {
-        let cache = state.cache.lock().await;
-        if let Ok(Some(cached)) = cache.load_youth() {
-            return Ok(cached.data.iter().map(YouthDisplay::from).collect());
-        }
-        return Ok(vec![]);
-    }
-
-    // Try cache first; save stale data for fallback
-    let stale_data = {
-        let cache = state.cache.lock().await;
-        match cache.load_youth() {
-            Ok(Some(cached)) => {
-                if !cached.is_stale() {
-                    return Ok(cached.data.iter().map(YouthDisplay::from).collect());
-                }
-                Some(cached.data)
-            }
-            _ => None,
-        }
-    };
-
-    // Fetch from API, fall back to stale cache on error
     let api = state.api_client.lock().await;
-    match api.fetch_youth(&org_guid).await {
-        Ok(youth) => {
-            drop(api);
-            let cache = state.cache.lock().await;
-            let _ = cache.save_youth(&youth);
-            Ok(youth.iter().map(YouthDisplay::from).collect())
-        }
-        Err(e) => match stale_data {
-            Some(data) => Ok(data.iter().map(YouthDisplay::from).collect()),
-            None => Err(e.into()),
-        },
-    }
+    let cache = state.cache.lock().await;
+    let data = fetch_with_cache(
+        offline,
+        || cache.load_youth(),
+        |d| cache.save_youth(d),
+        api.fetch_youth(&org_guid),
+    ).await?;
+
+    Ok(data.map(|d| d.iter().map(YouthDisplay::from).collect()).unwrap_or_default())
 }
 
 #[tauri::command]
@@ -201,40 +212,16 @@ pub async fn get_adults(state: State<'_, GuiAppState>) -> CommandResult<Vec<Adul
     let org_guid = config.organization_guid.clone().unwrap_or_default();
     drop(config);
 
-    if offline {
-        let cache = state.cache.lock().await;
-        if let Ok(Some(cached)) = cache.load_adults() {
-            return Ok(cached.data.iter().map(AdultDisplay::from).collect());
-        }
-        return Ok(vec![]);
-    }
-
-    let stale_data = {
-        let cache = state.cache.lock().await;
-        match cache.load_adults() {
-            Ok(Some(cached)) => {
-                if !cached.is_stale() {
-                    return Ok(cached.data.iter().map(AdultDisplay::from).collect());
-                }
-                Some(cached.data)
-            }
-            _ => None,
-        }
-    };
-
     let api = state.api_client.lock().await;
-    match api.fetch_adults(&org_guid).await {
-        Ok(adults) => {
-            drop(api);
-            let cache = state.cache.lock().await;
-            let _ = cache.save_adults(&adults);
-            Ok(adults.iter().map(AdultDisplay::from).collect())
-        }
-        Err(e) => match stale_data {
-            Some(data) => Ok(data.iter().map(AdultDisplay::from).collect()),
-            None => Err(e.into()),
-        },
-    }
+    let cache = state.cache.lock().await;
+    let data = fetch_with_cache(
+        offline,
+        || cache.load_adults(),
+        |d| cache.save_adults(d),
+        async { api.fetch_adults(&org_guid).await.map(Adult::deduplicate) },
+    ).await?;
+
+    Ok(data.map(|d| d.iter().map(AdultDisplay::from).collect()).unwrap_or_default())
 }
 
 #[tauri::command]
@@ -244,82 +231,36 @@ pub async fn get_parents(state: State<'_, GuiAppState>) -> CommandResult<Vec<Par
     let org_guid = config.organization_guid.clone().unwrap_or_default();
     drop(config);
 
-    if offline {
-        let cache = state.cache.lock().await;
-        if let Ok(Some(cached)) = cache.load_parents() {
-            return Ok(cached.data.iter().map(ParentDisplay::from).collect());
-        }
-        return Ok(vec![]);
-    }
-
-    let stale_data = {
-        let cache = state.cache.lock().await;
-        match cache.load_parents() {
-            Ok(Some(cached)) => {
-                if !cached.is_stale() {
-                    return Ok(cached.data.iter().map(ParentDisplay::from).collect());
-                }
-                Some(cached.data)
-            }
-            _ => None,
-        }
-    };
-
     let api = state.api_client.lock().await;
-    match api.fetch_parents(&org_guid).await {
-        Ok(parents) => {
-            drop(api);
-            let cache = state.cache.lock().await;
-            let _ = cache.save_parents(&parents);
-            Ok(parents.iter().map(ParentDisplay::from).collect())
-        }
-        Err(e) => match stale_data {
-            Some(data) => Ok(data.iter().map(ParentDisplay::from).collect()),
-            None => Err(e.into()),
-        },
-    }
+    let cache = state.cache.lock().await;
+    let data = fetch_with_cache(
+        offline,
+        || cache.load_parents(),
+        |d| cache.save_parents(d),
+        api.fetch_parents(&org_guid),
+    ).await?;
+
+    Ok(data.map(|d| d.iter().map(ParentDisplay::from).collect()).unwrap_or_default())
 }
 
 #[tauri::command]
 pub async fn get_events(state: State<'_, GuiAppState>) -> CommandResult<Vec<EventDisplay>> {
-    if is_offline(&state).await {
-        let cache = state.cache.lock().await;
-        if let Ok(Some(cached)) = cache.load_events() {
-            return Ok(cached.data.iter().map(EventDisplay::from).collect());
-        }
-        return Ok(vec![]);
-    }
+    let offline = is_offline(&state).await;
 
     let session = state.session.lock().await;
     let user_id = session.user_id().unwrap_or(0);
     drop(session);
 
-    let stale_data = {
-        let cache = state.cache.lock().await;
-        match cache.load_events() {
-            Ok(Some(cached)) => {
-                if !cached.is_stale() {
-                    return Ok(cached.data.iter().map(EventDisplay::from).collect());
-                }
-                Some(cached.data)
-            }
-            _ => None,
-        }
-    };
-
     let api = state.api_client.lock().await;
-    match api.fetch_events(user_id).await {
-        Ok(events) => {
-            drop(api);
-            let cache = state.cache.lock().await;
-            let _ = cache.save_events(&events);
-            Ok(events.iter().map(EventDisplay::from).collect())
-        }
-        Err(e) => match stale_data {
-            Some(data) => Ok(data.iter().map(EventDisplay::from).collect()),
-            None => Err(e.into()),
-        },
-    }
+    let cache = state.cache.lock().await;
+    let data = fetch_with_cache(
+        offline,
+        || cache.load_events(),
+        |d| cache.save_events(d),
+        api.fetch_events(user_id),
+    ).await?;
+
+    Ok(data.map(|d| d.iter().map(EventDisplay::from).collect()).unwrap_or_default())
 }
 
 #[tauri::command]
@@ -381,40 +322,16 @@ pub async fn get_patrols(state: State<'_, GuiAppState>) -> CommandResult<Vec<Pat
     let org_guid = config.organization_guid.clone().unwrap_or_default();
     drop(config);
 
-    if offline {
-        let cache = state.cache.lock().await;
-        if let Ok(Some(cached)) = cache.load_patrols() {
-            return Ok(cached.data);
-        }
-        return Ok(vec![]);
-    }
-
-    let stale_data = {
-        let cache = state.cache.lock().await;
-        match cache.load_patrols() {
-            Ok(Some(cached)) => {
-                if !cached.is_stale() {
-                    return Ok(cached.data);
-                }
-                Some(cached.data)
-            }
-            _ => None,
-        }
-    };
-
     let api = state.api_client.lock().await;
-    match api.fetch_patrols(&org_guid).await {
-        Ok(patrols) => {
-            drop(api);
-            let cache = state.cache.lock().await;
-            let _ = cache.save_patrols(&patrols);
-            Ok(patrols)
-        }
-        Err(e) => match stale_data {
-            Some(data) => Ok(data),
-            None => Err(e.into()),
-        },
-    }
+    let cache = state.cache.lock().await;
+    let data = fetch_with_cache(
+        offline,
+        || cache.load_patrols(),
+        |d| cache.save_patrols(d),
+        api.fetch_patrols(&org_guid),
+    ).await?;
+
+    Ok(data.unwrap_or_default())
 }
 
 #[tauri::command]
@@ -424,40 +341,17 @@ pub async fn get_unit_info(state: State<'_, GuiAppState>) -> CommandResult<UnitI
     let org_guid = config.organization_guid.clone().unwrap_or_default();
     drop(config);
 
-    if offline {
-        let cache = state.cache.lock().await;
-        if let Ok(Some(cached)) = cache.load_unit_info() {
-            return Ok(cached.data);
-        }
-        return Err(CommandError { message: "No cached unit info available".into() });
-    }
-
-    let stale_data = {
-        let cache = state.cache.lock().await;
-        match cache.load_unit_info() {
-            Ok(Some(cached)) => {
-                if !cached.is_stale() {
-                    return Ok(cached.data);
-                }
-                Some(cached.data)
-            }
-            _ => None,
-        }
-    };
-
     let api = state.api_client.lock().await;
-    match api.fetch_unit_pin(&org_guid).await {
-        Ok(info) => {
-            drop(api);
-            let cache = state.cache.lock().await;
-            let _ = cache.save_unit_info(&info);
-            Ok(info)
-        }
-        Err(e) => match stale_data {
-            Some(data) => Ok(data),
-            None => Err(e.into()),
-        },
-    }
+    let cache = state.cache.lock().await;
+    let data = fetch_with_cache(
+        offline,
+        || cache.load_unit_info(),
+        |d| cache.save_unit_info(d),
+        api.fetch_unit_pin(&org_guid),
+    ).await?;
+
+    data.map(|d| d.with_computed_fields())
+        .ok_or_else(|| CommandError { message: "No cached unit info available".into() })
 }
 
 #[tauri::command]
@@ -467,40 +361,16 @@ pub async fn get_key3(state: State<'_, GuiAppState>) -> CommandResult<Key3Leader
     let org_guid = config.organization_guid.clone().unwrap_or_default();
     drop(config);
 
-    if offline {
-        let cache = state.cache.lock().await;
-        if let Ok(Some(cached)) = cache.load_key3() {
-            return Ok(cached.data);
-        }
-        return Err(CommandError { message: "No cached Key 3 data available".into() });
-    }
-
-    let stale_data = {
-        let cache = state.cache.lock().await;
-        match cache.load_key3() {
-            Ok(Some(cached)) => {
-                if !cached.is_stale() {
-                    return Ok(cached.data);
-                }
-                Some(cached.data)
-            }
-            _ => None,
-        }
-    };
-
     let api = state.api_client.lock().await;
-    match api.fetch_key3(&org_guid).await {
-        Ok(key3) => {
-            drop(api);
-            let cache = state.cache.lock().await;
-            let _ = cache.save_key3(&key3);
-            Ok(key3)
-        }
-        Err(e) => match stale_data {
-            Some(data) => Ok(data),
-            None => Err(e.into()),
-        },
-    }
+    let cache = state.cache.lock().await;
+    let data = fetch_with_cache(
+        offline,
+        || cache.load_key3(),
+        |d| cache.save_key3(d),
+        api.fetch_key3(&org_guid),
+    ).await?;
+
+    data.ok_or_else(|| CommandError { message: "No cached Key 3 data available".into() })
 }
 
 #[tauri::command]
@@ -510,40 +380,16 @@ pub async fn get_org_profile(state: State<'_, GuiAppState>) -> CommandResult<Org
     let org_guid = config.organization_guid.clone().unwrap_or_default();
     drop(config);
 
-    if offline {
-        let cache = state.cache.lock().await;
-        if let Ok(Some(cached)) = cache.load_org_profile() {
-            return Ok(cached.data);
-        }
-        return Err(CommandError { message: "No cached org profile available".into() });
-    }
-
-    let stale_data = {
-        let cache = state.cache.lock().await;
-        match cache.load_org_profile() {
-            Ok(Some(cached)) => {
-                if !cached.is_stale() {
-                    return Ok(cached.data);
-                }
-                Some(cached.data)
-            }
-            _ => None,
-        }
-    };
-
     let api = state.api_client.lock().await;
-    match api.fetch_org_profile(&org_guid).await {
-        Ok(profile) => {
-            drop(api);
-            let cache = state.cache.lock().await;
-            let _ = cache.save_org_profile(&profile);
-            Ok(profile)
-        }
-        Err(e) => match stale_data {
-            Some(data) => Ok(data),
-            None => Err(e.into()),
-        },
-    }
+    let cache = state.cache.lock().await;
+    let data = fetch_with_cache(
+        offline,
+        || cache.load_org_profile(),
+        |d| cache.save_org_profile(d),
+        api.fetch_org_profile(&org_guid),
+    ).await?;
+
+    data.ok_or_else(|| CommandError { message: "No cached org profile available".into() })
 }
 
 #[tauri::command]
@@ -553,40 +399,16 @@ pub async fn get_commissioners(state: State<'_, GuiAppState>) -> CommandResult<V
     let org_guid = config.organization_guid.clone().unwrap_or_default();
     drop(config);
 
-    if offline {
-        let cache = state.cache.lock().await;
-        if let Ok(Some(cached)) = cache.load_commissioners() {
-            return Ok(cached.data);
-        }
-        return Ok(vec![]);
-    }
-
-    let stale_data = {
-        let cache = state.cache.lock().await;
-        match cache.load_commissioners() {
-            Ok(Some(cached)) => {
-                if !cached.is_stale() {
-                    return Ok(cached.data);
-                }
-                Some(cached.data)
-            }
-            _ => None,
-        }
-    };
-
     let api = state.api_client.lock().await;
-    match api.fetch_commissioners(&org_guid).await {
-        Ok(commissioners) => {
-            drop(api);
-            let cache = state.cache.lock().await;
-            let _ = cache.save_commissioners(&commissioners);
-            Ok(commissioners)
-        }
-        Err(e) => match stale_data {
-            Some(data) => Ok(data),
-            None => Err(e.into()),
-        },
-    }
+    let cache = state.cache.lock().await;
+    let data = fetch_with_cache(
+        offline,
+        || cache.load_commissioners(),
+        |d| cache.save_commissioners(d),
+        api.fetch_commissioners(&org_guid),
+    ).await?;
+
+    Ok(data.unwrap_or_default())
 }
 
 // ============================================================================
@@ -602,40 +424,16 @@ pub async fn get_advancement_dashboard(
     let org_guid = config.organization_guid.clone().unwrap_or_default();
     drop(config);
 
-    if offline {
-        let cache = state.cache.lock().await;
-        if let Ok(Some(cached)) = cache.load_advancement_dashboard() {
-            return Ok(cached.data);
-        }
-        return Err(CommandError { message: "No cached advancement data available".into() });
-    }
-
-    let stale_data = {
-        let cache = state.cache.lock().await;
-        match cache.load_advancement_dashboard() {
-            Ok(Some(cached)) => {
-                if !cached.is_stale() {
-                    return Ok(cached.data);
-                }
-                Some(cached.data)
-            }
-            _ => None,
-        }
-    };
-
     let api = state.api_client.lock().await;
-    match api.fetch_advancement_dashboard(&org_guid).await {
-        Ok(dashboard) => {
-            drop(api);
-            let cache = state.cache.lock().await;
-            let _ = cache.save_advancement_dashboard(&dashboard);
-            Ok(dashboard)
-        }
-        Err(e) => match stale_data {
-            Some(data) => Ok(data),
-            None => Err(e.into()),
-        },
-    }
+    let cache = state.cache.lock().await;
+    let data = fetch_with_cache(
+        offline,
+        || cache.load_advancement_dashboard(),
+        |d| cache.save_advancement_dashboard(d),
+        api.fetch_advancement_dashboard(&org_guid),
+    ).await?;
+
+    data.ok_or_else(|| CommandError { message: "No cached advancement data available".into() })
 }
 
 #[tauri::command]
@@ -643,81 +441,43 @@ pub async fn get_youth_ranks(
     user_id: i64,
     state: State<'_, GuiAppState>,
 ) -> CommandResult<Vec<RankProgressDisplay>> {
-    if is_offline(&state).await {
-        let cache = state.cache.lock().await;
-        if let Ok(Some(cached)) = cache.load_youth_ranks(user_id) {
-            return Ok(cached.data.iter().map(RankProgressDisplay::from).collect());
-        }
-        return Ok(vec![]);
-    }
-
-    let stale_data = {
-        let cache = state.cache.lock().await;
-        match cache.load_youth_ranks(user_id) {
-            Ok(Some(cached)) => {
-                if !cached.is_stale() {
-                    return Ok(cached.data.iter().map(RankProgressDisplay::from).collect());
-                }
-                Some(cached.data)
-            }
-            _ => None,
-        }
-    };
-
+    let offline = is_offline(&state).await;
     let api = state.api_client.lock().await;
-    match api.fetch_youth_ranks(user_id).await {
-        Ok(ranks) => {
-            drop(api);
-            let cache = state.cache.lock().await;
-            let _ = cache.save_youth_ranks(user_id, &ranks);
-            Ok(ranks.iter().map(RankProgressDisplay::from).collect())
-        }
-        Err(e) => match stale_data {
-            Some(data) => Ok(data.iter().map(RankProgressDisplay::from).collect()),
-            None => Err(e.into()),
-        },
-    }
+    let cache = state.cache.lock().await;
+    let data = fetch_with_cache(
+        offline,
+        || cache.load_youth_ranks(user_id),
+        |d| cache.save_youth_ranks(user_id, d),
+        api.fetch_youth_ranks(user_id),
+    ).await?;
+
+    Ok(data.map(|d| d.iter().map(RankProgressDisplay::from).collect()).unwrap_or_default())
 }
 
 #[tauri::command]
 pub async fn get_youth_merit_badges(
     user_id: i64,
     state: State<'_, GuiAppState>,
-) -> CommandResult<Vec<MeritBadgeDisplay>> {
-    if is_offline(&state).await {
-        let cache = state.cache.lock().await;
-        if let Ok(Some(cached)) = cache.load_youth_merit_badges(user_id) {
-            return Ok(cached.data.iter().map(MeritBadgeDisplay::from).collect());
-        }
-        return Ok(vec![]);
-    }
-
-    let stale_data = {
-        let cache = state.cache.lock().await;
-        match cache.load_youth_merit_badges(user_id) {
-            Ok(Some(cached)) => {
-                if !cached.is_stale() {
-                    return Ok(cached.data.iter().map(MeritBadgeDisplay::from).collect());
-                }
-                Some(cached.data)
-            }
-            _ => None,
-        }
-    };
-
+) -> CommandResult<YouthBadgesResponse> {
+    let offline = is_offline(&state).await;
     let api = state.api_client.lock().await;
-    match api.fetch_youth_merit_badges(user_id).await {
-        Ok(badges) => {
-            drop(api);
-            let cache = state.cache.lock().await;
-            let _ = cache.save_youth_merit_badges(user_id, &badges);
-            Ok(badges.iter().map(MeritBadgeDisplay::from).collect())
-        }
-        Err(e) => match stale_data {
-            Some(data) => Ok(data.iter().map(MeritBadgeDisplay::from).collect()),
-            None => Err(e.into()),
-        },
-    }
+    let cache = state.cache.lock().await;
+    let data = fetch_with_cache(
+        offline,
+        || cache.load_youth_merit_badges(user_id),
+        |d| cache.save_youth_merit_badges(user_id, d),
+        api.fetch_youth_merit_badges(user_id),
+    ).await?;
+
+    Ok(data.map(|mut d| {
+        let summary = MeritBadgeProgress::summarize(&d);
+        d.sort_by(MeritBadgeProgress::cmp_by_progress);
+        let badges = d.iter().map(MeritBadgeDisplay::from).collect();
+        YouthBadgesResponse { badges, summary }
+    }).unwrap_or_else(|| YouthBadgesResponse {
+        badges: vec![],
+        summary: Default::default(),
+    }))
 }
 
 #[tauri::command]
@@ -725,40 +485,20 @@ pub async fn get_youth_leadership(
     user_id: i64,
     state: State<'_, GuiAppState>,
 ) -> CommandResult<Vec<LeadershipDisplay>> {
-    if is_offline(&state).await {
-        let cache = state.cache.lock().await;
-        if let Ok(Some(cached)) = cache.load_youth_leadership(user_id) {
-            return Ok(cached.data.iter().map(LeadershipDisplay::from).collect());
-        }
-        return Ok(vec![]);
-    }
-
-    let stale_data = {
-        let cache = state.cache.lock().await;
-        match cache.load_youth_leadership(user_id) {
-            Ok(Some(cached)) => {
-                if !cached.is_stale() {
-                    return Ok(cached.data.iter().map(LeadershipDisplay::from).collect());
-                }
-                Some(cached.data)
-            }
-            _ => None,
-        }
-    };
-
+    let offline = is_offline(&state).await;
     let api = state.api_client.lock().await;
-    match api.fetch_youth_leadership(user_id).await {
-        Ok(positions) => {
-            drop(api);
-            let cache = state.cache.lock().await;
-            let _ = cache.save_youth_leadership(user_id, &positions);
-            Ok(positions.iter().map(LeadershipDisplay::from).collect())
-        }
-        Err(e) => match stale_data {
-            Some(data) => Ok(data.iter().map(LeadershipDisplay::from).collect()),
-            None => Err(e.into()),
-        },
-    }
+    let cache = state.cache.lock().await;
+    let data = fetch_with_cache(
+        offline,
+        || cache.load_youth_leadership(user_id),
+        |d| cache.save_youth_leadership(user_id, d),
+        api.fetch_youth_leadership(user_id),
+    ).await?;
+
+    Ok(data.map(|mut d| {
+        LeadershipPosition::sort_for_display(&mut d);
+        d.iter().map(LeadershipDisplay::from).collect()
+    }).unwrap_or_default())
 }
 
 #[tauri::command]
@@ -766,40 +506,17 @@ pub async fn get_youth_awards(
     user_id: i64,
     state: State<'_, GuiAppState>,
 ) -> CommandResult<Vec<AwardDisplay>> {
-    if is_offline(&state).await {
-        let cache = state.cache.lock().await;
-        if let Ok(Some(cached)) = cache.load_youth_awards(user_id) {
-            return Ok(cached.data.iter().map(AwardDisplay::from).collect());
-        }
-        return Ok(vec![]);
-    }
-
-    let stale_data = {
-        let cache = state.cache.lock().await;
-        match cache.load_youth_awards(user_id) {
-            Ok(Some(cached)) => {
-                if !cached.is_stale() {
-                    return Ok(cached.data.iter().map(AwardDisplay::from).collect());
-                }
-                Some(cached.data)
-            }
-            _ => None,
-        }
-    };
-
+    let offline = is_offline(&state).await;
     let api = state.api_client.lock().await;
-    match api.fetch_youth_awards(user_id).await {
-        Ok(awards) => {
-            drop(api);
-            let cache = state.cache.lock().await;
-            let _ = cache.save_youth_awards(user_id, &awards);
-            Ok(awards.iter().map(AwardDisplay::from).collect())
-        }
-        Err(e) => match stale_data {
-            Some(data) => Ok(data.iter().map(AwardDisplay::from).collect()),
-            None => Err(e.into()),
-        },
-    }
+    let cache = state.cache.lock().await;
+    let data = fetch_with_cache(
+        offline,
+        || cache.load_youth_awards(user_id),
+        |d| cache.save_youth_awards(user_id, d),
+        api.fetch_youth_awards(user_id),
+    ).await?;
+
+    Ok(data.map(|d| d.iter().map(AwardDisplay::from).collect()).unwrap_or_default())
 }
 
 #[tauri::command]
@@ -808,50 +525,21 @@ pub async fn get_rank_requirements(
     rank_id: i64,
     state: State<'_, GuiAppState>,
 ) -> CommandResult<Vec<RankRequirementDisplay>> {
-    if is_offline(&state).await {
-        let cache = state.cache.lock().await;
-        if let Ok(Some(cached)) = cache.load_rank_requirements(user_id, rank_id) {
-            let mut reqs: Vec<_> = cached.data.iter().map(RankRequirementDisplay::from).collect();
-            sort_requirements(&mut reqs);
-            return Ok(reqs);
-        }
-        return Ok(vec![]);
-    }
-
-    let stale_data = {
-        let cache = state.cache.lock().await;
-        match cache.load_rank_requirements(user_id, rank_id) {
-            Ok(Some(cached)) => {
-                if !cached.is_stale() {
-                    let mut reqs: Vec<_> = cached.data.iter().map(RankRequirementDisplay::from).collect();
-                    sort_requirements(&mut reqs);
-                    return Ok(reqs);
-                }
-                Some(cached.data)
-            }
-            _ => None,
-        }
-    };
-
+    let offline = is_offline(&state).await;
     let api = state.api_client.lock().await;
-    match api.fetch_rank_requirements(user_id, rank_id).await {
-        Ok(requirements) => {
-            drop(api);
-            let cache = state.cache.lock().await;
-            let _ = cache.save_rank_requirements(user_id, rank_id, &requirements);
-            let mut reqs: Vec<_> = requirements.iter().map(RankRequirementDisplay::from).collect();
-            sort_requirements(&mut reqs);
-            Ok(reqs)
-        }
-        Err(e) => match stale_data {
-            Some(data) => {
-                let mut reqs: Vec<_> = data.iter().map(RankRequirementDisplay::from).collect();
-                sort_requirements(&mut reqs);
-                Ok(reqs)
-            }
-            None => Err(e.into()),
-        },
-    }
+    let cache = state.cache.lock().await;
+    let data = fetch_with_cache(
+        offline,
+        || cache.load_rank_requirements(user_id, rank_id),
+        |d| cache.save_rank_requirements(user_id, rank_id, d),
+        api.fetch_rank_requirements(user_id, rank_id),
+    ).await?;
+
+    let mut reqs: Vec<RankRequirementDisplay> = data
+        .map(|d| d.iter().map(RankRequirementDisplay::from).collect())
+        .unwrap_or_default();
+    sort_requirements(&mut reqs);
+    Ok(reqs)
 }
 
 #[tauri::command]
@@ -971,6 +659,48 @@ pub async fn set_offline_mode(
 }
 
 // ============================================================================
+// Offline Caching Command
+// ============================================================================
+
+/// Cache all data for offline use: base data + per-youth ranks/badges/requirements + event RSVP.
+#[tauri::command]
+pub async fn cache_for_offline(
+    app: tauri::AppHandle,
+    state: State<'_, GuiAppState>,
+) -> CommandResult<String> {
+    let config = state.config.lock().await;
+    let org_guid = config.organization_guid.clone().unwrap_or_default();
+    drop(config);
+
+    let session = state.session.lock().await;
+    let user_id = session.user_id().unwrap_or(0);
+    drop(session);
+
+    let api = state.api_client.lock().await;
+    let cache = state.cache.lock().await;
+
+    let app_handle = app.clone();
+    let result = trailcache_core::cache::cache_all_for_offline(
+        &api,
+        &cache,
+        &org_guid,
+        user_id,
+        |progress| {
+            let _ = app_handle.emit("refresh-progress", RefreshProgress {
+                step: progress.description,
+                current: progress.current,
+                total: progress.total,
+                error: None,
+            });
+        },
+    )
+    .await
+    .map_err(|e| CommandError { message: e.to_string() })?;
+
+    Ok(result)
+}
+
+// ============================================================================
 // Refresh Command (with progress events)
 // ============================================================================
 
@@ -991,208 +721,37 @@ pub async fn refresh_data(
     let user_id = session.user_id().unwrap_or(0);
     drop(session);
 
+    let api = state.api_client.lock().await;
+    let cache = state.cache.lock().await;
+
+    let app_handle = app.clone();
+    let result = trailcache_core::cache::refresh_base_data(
+        &api,
+        &cache,
+        &org_guid,
+        user_id,
+        |progress| {
+            let _ = app_handle.emit("refresh-progress", RefreshProgress {
+                step: progress.description,
+                current: progress.current,
+                total: progress.total,
+                error: None,
+            });
+        },
+    ).await;
+
+    let successes = result.successes;
+    let errors = result.errors;
     let total = 10u32;
-    let mut successes = 0u32;
-    let mut errors: Vec<String> = Vec::new();
 
-    // Helper to emit progress
-    let emit = |step: &str, current: u32, error: Option<String>| {
+    // Emit errors for any failed sources
+    for err in &errors {
         let _ = app.emit("refresh-progress", RefreshProgress {
-            step: step.to_string(),
-            current,
+            step: err.clone(),
+            current: total,
             total,
-            error,
+            error: Some(err.clone()),
         });
-    };
-
-    // 1. Youth
-    emit("Fetching scouts...", 1, None);
-    {
-        let api = state.api_client.lock().await;
-        match api.fetch_youth(&org_guid).await {
-            Ok(data) => {
-                drop(api);
-                let cache = state.cache.lock().await;
-                let _ = cache.save_youth(&data);
-                successes += 1;
-            }
-            Err(e) => {
-                let msg = format!("Scouts: {}", e);
-                emit("Fetching scouts...", 1, Some(msg.clone()));
-                errors.push(msg);
-            }
-        }
-    }
-
-    // 2. Adults
-    emit("Fetching adults...", 2, None);
-    {
-        let api = state.api_client.lock().await;
-        match api.fetch_adults(&org_guid).await {
-            Ok(data) => {
-                drop(api);
-                let cache = state.cache.lock().await;
-                let _ = cache.save_adults(&data);
-                successes += 1;
-            }
-            Err(e) => {
-                let msg = format!("Adults: {}", e);
-                emit("Fetching adults...", 2, Some(msg.clone()));
-                errors.push(msg);
-            }
-        }
-    }
-
-    // 3. Events
-    emit("Fetching events...", 3, None);
-    {
-        let api = state.api_client.lock().await;
-        match api.fetch_events(user_id).await {
-            Ok(data) => {
-                drop(api);
-                let cache = state.cache.lock().await;
-                let _ = cache.save_events(&data);
-                successes += 1;
-            }
-            Err(e) => {
-                let msg = format!("Events: {}", e);
-                emit("Fetching events...", 3, Some(msg.clone()));
-                errors.push(msg);
-            }
-        }
-    }
-
-    // 4. Patrols
-    emit("Fetching patrols...", 4, None);
-    {
-        let api = state.api_client.lock().await;
-        match api.fetch_patrols(&org_guid).await {
-            Ok(data) => {
-                drop(api);
-                let cache = state.cache.lock().await;
-                let _ = cache.save_patrols(&data);
-                successes += 1;
-            }
-            Err(e) => {
-                let msg = format!("Patrols: {}", e);
-                emit("Fetching patrols...", 4, Some(msg.clone()));
-                errors.push(msg);
-            }
-        }
-    }
-
-    // 5. Unit Info
-    emit("Fetching unit info...", 5, None);
-    {
-        let api = state.api_client.lock().await;
-        match api.fetch_unit_pin(&org_guid).await {
-            Ok(data) => {
-                drop(api);
-                let cache = state.cache.lock().await;
-                let _ = cache.save_unit_info(&data);
-                successes += 1;
-            }
-            Err(e) => {
-                let msg = format!("Unit info: {}", e);
-                emit("Fetching unit info...", 5, Some(msg.clone()));
-                errors.push(msg);
-            }
-        }
-    }
-
-    // 6. Key 3
-    emit("Fetching Key 3...", 6, None);
-    {
-        let api = state.api_client.lock().await;
-        match api.fetch_key3(&org_guid).await {
-            Ok(data) => {
-                drop(api);
-                let cache = state.cache.lock().await;
-                let _ = cache.save_key3(&data);
-                successes += 1;
-            }
-            Err(e) => {
-                let msg = format!("Key 3: {}", e);
-                emit("Fetching Key 3...", 6, Some(msg.clone()));
-                errors.push(msg);
-            }
-        }
-    }
-
-    // 7. Commissioners
-    emit("Fetching commissioners...", 7, None);
-    {
-        let api = state.api_client.lock().await;
-        match api.fetch_commissioners(&org_guid).await {
-            Ok(data) => {
-                drop(api);
-                let cache = state.cache.lock().await;
-                let _ = cache.save_commissioners(&data);
-                successes += 1;
-            }
-            Err(e) => {
-                let msg = format!("Commissioners: {}", e);
-                emit("Fetching commissioners...", 7, Some(msg.clone()));
-                errors.push(msg);
-            }
-        }
-    }
-
-    // 8. Org Profile
-    emit("Fetching org profile...", 8, None);
-    {
-        let api = state.api_client.lock().await;
-        match api.fetch_org_profile(&org_guid).await {
-            Ok(data) => {
-                drop(api);
-                let cache = state.cache.lock().await;
-                let _ = cache.save_org_profile(&data);
-                successes += 1;
-            }
-            Err(e) => {
-                let msg = format!("Org profile: {}", e);
-                emit("Fetching org profile...", 8, Some(msg.clone()));
-                errors.push(msg);
-            }
-        }
-    }
-
-    // 9. Parents
-    emit("Fetching parents...", 9, None);
-    {
-        let api = state.api_client.lock().await;
-        match api.fetch_parents(&org_guid).await {
-            Ok(data) => {
-                drop(api);
-                let cache = state.cache.lock().await;
-                let _ = cache.save_parents(&data);
-                successes += 1;
-            }
-            Err(e) => {
-                let msg = format!("Parents: {}", e);
-                emit("Fetching parents...", 9, Some(msg.clone()));
-                errors.push(msg);
-            }
-        }
-    }
-
-    // 10. Advancement Dashboard
-    emit("Fetching advancement...", 10, None);
-    {
-        let api = state.api_client.lock().await;
-        match api.fetch_advancement_dashboard(&org_guid).await {
-            Ok(data) => {
-                drop(api);
-                let cache = state.cache.lock().await;
-                let _ = cache.save_advancement_dashboard(&data);
-                successes += 1;
-            }
-            Err(e) => {
-                let msg = format!("Advancement: {}", e);
-                emit("Fetching advancement...", 10, Some(msg.clone()));
-                errors.push(msg);
-            }
-        }
     }
 
     if errors.is_empty() {

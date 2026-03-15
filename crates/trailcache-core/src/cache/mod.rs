@@ -10,6 +10,12 @@
 //! - Advancement dashboard and progress data
 //! - Patrols
 
+pub mod fetch;
 pub mod manager;
+pub mod offline;
+pub mod refresh;
 
+pub use fetch::fetch_with_cache;
 pub use manager::{CacheAges, CacheManager};
+pub use offline::{cache_all_for_offline, CacheProgress};
+pub use refresh::{refresh_base_data, RefreshResult as BaseRefreshResult};

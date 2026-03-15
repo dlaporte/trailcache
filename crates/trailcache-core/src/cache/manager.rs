@@ -25,13 +25,13 @@ const NONCE_SIZE: usize = 12; // ChaCha20-Poly1305 nonce size
 
 /// Derive a 256-bit encryption key from password and salt using Argon2.
 /// The same password + salt always produces the same key.
-fn derive_key_from_password(password: &str, salt: &str) -> [u8; 32] {
+fn derive_key_from_password(password: &str, salt: &str) -> Result<[u8; 32]> {
     let mut key = [0u8; 32];
     // Use Argon2id with default parameters - secure and reasonably fast
     Argon2::default()
         .hash_password_into(password.as_bytes(), salt.as_bytes(), &mut key)
-        .expect("Argon2 key derivation failed");
-    key
+        .map_err(|e| anyhow::anyhow!("Argon2 key derivation failed: {}", e))?;
+    Ok(key)
 }
 
 /// Encrypts data using ChaCha20-Poly1305 with a random nonce.
@@ -140,28 +140,39 @@ impl<T> CachedData<T> {
     }
 }
 
+#[derive(Clone)]
 pub struct CacheManager {
     cache_dir: PathBuf,
     encryption_key: [u8; 32],
 }
 
 impl CacheManager {
-    /// Create a CacheManager without encryption (for pre-login state).
-    /// Cache operations will fail until set_password is called.
+    /// Create a CacheManager for pre-login state.
+    /// Uses a placeholder key that will fail to decrypt any existing cache,
+    /// causing all loads to return `Ok(None)` until `set_password()` is called.
+    /// Saves made before `set_password()` will be encrypted with the wrong key
+    /// and become unreadable — this is intentional (no data should be cached pre-login).
     pub fn new_without_encryption(cache_dir: PathBuf) -> Result<Self> {
         std::fs::create_dir_all(&cache_dir)?;
         Ok(Self {
             cache_dir,
-            encryption_key: [0u8; 32], // Placeholder - will fail to decrypt
+            encryption_key: [0u8; 32],
         })
     }
 
     /// Set encryption key derived from password + org_guid.
     /// Must be called after login before cache operations will work.
     pub fn set_password(&mut self, password: &str, org_guid: &str) {
-        use tracing::info;
-        self.encryption_key = derive_key_from_password(password, org_guid);
-        info!("Encryption key derived from password");
+        use tracing::{info, warn};
+        match derive_key_from_password(password, org_guid) {
+            Ok(key) => {
+                self.encryption_key = key;
+                info!("Encryption key derived from password");
+            }
+            Err(e) => {
+                warn!("Key derivation failed, cache encryption unavailable: {}", e);
+            }
+        }
     }
 
     fn cache_path(&self, name: &str) -> PathBuf {

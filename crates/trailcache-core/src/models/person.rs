@@ -1,8 +1,20 @@
 // Allow dead code: API response structs have fields for completeness
 #![allow(dead_code)]
 
+use std::cmp::Ordering;
+use std::collections::HashMap;
+
 use serde::{Deserialize, Serialize};
 use chrono::{NaiveDate, Utc, Datelike};
+
+pub const PROGRAM_SCOUTS_BSA: &str = "Scouts BSA";
+pub const PROGRAM_ID_SCOUTS_BSA: i32 = 2;
+pub const UNIT_TYPE_ID_SCOUTS_BSA: i32 = 2;
+pub const POSITION_SCOUT: &str = "Scout";
+pub const POSITION_PATROL_LEADER: &str = "Patrol Leader";
+pub const POSITION_ASST_PATROL_LEADER: &str = "Assistant Patrol Leader";
+pub const DISPLAY_NOT_TRAINED: &str = "Not Trained";
+pub const DEFAULT_ADULT_ROLE: &str = "Adult Leader";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PersonType {
@@ -139,12 +151,12 @@ impl UnitYouth {
 
         // Find highest Scouts BSA rank (programId 2, unitTypeId 2)
         let scouts_bsa_rank = self.highest_ranks_awarded.iter()
-            .filter(|r| r.program_id == Some(2) && r.unit_type_id == Some(2))
+            .filter(|r| r.program_id == Some(PROGRAM_ID_SCOUTS_BSA) && r.unit_type_id == Some(UNIT_TYPE_ID_SCOUTS_BSA))
             .max_by_key(|r| r.level);
 
         // Find position of responsibility (not "Scouts BSA" which is just member)
         let por = self.positions.iter()
-            .find(|p| p.position.as_deref().map(|s| s != "Scouts BSA").unwrap_or(false))
+            .find(|p| p.position.as_deref().map(|s| s != PROGRAM_SCOUTS_BSA).unwrap_or(false))
             .and_then(|p| p.position.clone());
 
         Youth {
@@ -162,8 +174,8 @@ impl UnitYouth {
             grade_id: None,
             position: por,
             position_id: None,
-            program_id: Some(2), // Scouts BSA
-            program: Some("Scouts BSA".to_string()),
+            program_id: Some(PROGRAM_ID_SCOUTS_BSA),
+            program: Some(PROGRAM_SCOUTS_BSA.to_string()),
             registrar_info: Some(RegistrarInfo {
                 date_of_birth: self.date_of_birth.clone(),
                 registration_id: None,
@@ -296,6 +308,13 @@ impl PrimaryAddressInfo {
         }
         Some(format!("{}, {}", city, state))
     }
+
+    /// Format city, state, and zip as a single line.
+    pub fn city_state_zip(&self) -> Option<String> {
+        let cs = self.city_state()?;
+        let zip = self.zip_code.as_deref().unwrap_or("");
+        Some(format!("{} {}", cs, zip).trim().to_string())
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -413,7 +432,7 @@ impl Youth {
         self.date_of_birth().map(|dob| {
             let today = Utc::now().date_naive();
             let mut age = today.year() - dob.year();
-            if today.ordinal() < dob.ordinal() {
+            if (today.month(), today.day()) < (dob.month(), dob.day()) {
                 age -= 1;
             }
             age
@@ -505,6 +524,34 @@ pub struct Adult {
 }
 
 impl Adult {
+    /// Classify position_trained field into a boolean.
+    /// "Trained"/"Y"/"Yes"/"true" → Some(true), "Not Trained"/"N"/"No"/"false" → Some(false), else None
+    pub fn is_position_trained(&self) -> Option<bool> {
+        match self.position_trained.as_deref() {
+            Some("Trained") | Some("Y") | Some("Yes") | Some("true") => Some(true),
+            Some("Not Trained") | Some("N") | Some("No") | Some("false") => Some(false),
+            _ => None,
+        }
+    }
+
+    /// Display string for position training status.
+    pub fn position_trained_display(&self) -> &str {
+        match self.is_position_trained() {
+            Some(true) => "Trained",
+            Some(false) => DISPLAY_NOT_TRAINED,
+            None => "-",
+        }
+    }
+
+    /// Check if this adult matches a search query (case-insensitive).
+    /// Query should already be lowercased.
+    pub fn matches_search(&self, query_lowercase: &str) -> bool {
+        self.first_name.to_lowercase().contains(query_lowercase)
+            || self.last_name.to_lowercase().contains(query_lowercase)
+            || self.position.as_ref().map(|s| s.to_lowercase().contains(query_lowercase)).unwrap_or(false)
+            || self.email().as_ref().map(|s| s.to_lowercase().contains(query_lowercase)).unwrap_or(false)
+    }
+
     pub fn full_name(&self) -> String {
         if let Some(ref full) = self.person_full_name {
             full.clone()
@@ -529,7 +576,7 @@ impl Adult {
     pub fn role(&self) -> String {
         self.position
             .clone()
-            .unwrap_or_else(|| "Adult Leader".to_string())
+            .unwrap_or_else(|| DEFAULT_ADULT_ROLE.to_string())
     }
 
     pub fn get_user_id(&self) -> i64 {
@@ -547,6 +594,51 @@ impl Adult {
             .and_then(|e| e.email_address.clone())
             .filter(|e| !e.is_empty())
             .or_else(|| self.email.clone())
+    }
+
+    /// Deduplicate adults by person_guid, combining multiple positions.
+    ///
+    /// The BSA API returns duplicate entries for adults who hold multiple
+    /// positions (e.g., both "Assistant Scoutmaster" and "Committee Member").
+    /// This merges duplicates into single entries with combined position strings
+    /// (e.g., "Assistant Scoutmaster, Committee Member").
+    ///
+    /// Adults without a person_guid are kept as separate entries.
+    /// Result is sorted by last_name, first_name.
+    pub fn deduplicate(adults: Vec<Adult>) -> Vec<Adult> {
+        let mut by_guid: HashMap<String, Adult> = HashMap::new();
+        let mut no_guid_counter: usize = 0;
+
+        for adult in adults {
+            let guid = adult.person_guid.clone().unwrap_or_default();
+            if guid.is_empty() {
+                by_guid.insert(format!("_no_guid_{}", no_guid_counter), adult);
+                no_guid_counter += 1;
+                continue;
+            }
+
+            if let Some(existing) = by_guid.get_mut(&guid) {
+                if let Some(new_pos) = &adult.position {
+                    if let Some(existing_pos) = &existing.position {
+                        let existing_positions: Vec<&str> = existing_pos
+                            .split(", ")
+                            .map(|s| s.trim())
+                            .collect();
+                        if !existing_positions.contains(&new_pos.as_str()) {
+                            existing.position = Some(format!("{}, {}", existing_pos, new_pos));
+                        }
+                    } else {
+                        existing.position = Some(new_pos.clone());
+                    }
+                }
+            } else {
+                by_guid.insert(guid, adult);
+            }
+        }
+
+        let mut result: Vec<Adult> = by_guid.into_values().collect();
+        result.sort_by(|a, b| a.last_name.cmp(&b.last_name).then(a.first_name.cmp(&b.first_name)));
+        result
     }
 }
 
@@ -661,7 +753,7 @@ impl Parent {
     pub fn phone(&self) -> Option<String> {
         self.mobile_phone.as_ref()
             .or(self.home_phone.as_ref())
-            .map(|p| format_phone_number(p))
+            .map(|p| crate::utils::format_phone(p))
     }
 
     pub fn address_line(&self) -> Option<String> {
@@ -672,6 +764,23 @@ impl Parent {
         Some(format!("{}, {}, {} {}", addr, city, state, zip))
     }
 
+    /// Format city, state, and zip as a single line.
+    pub fn city_state_zip(&self) -> Option<String> {
+        let city = self.city.as_deref().unwrap_or("");
+        let state = self.state.as_deref().unwrap_or("");
+        let zip = self.zip.as_deref().unwrap_or("");
+        if city.is_empty() && state.is_empty() {
+            return None;
+        }
+        let cs = if !city.is_empty() {
+            format!("{}, {}", city, state)
+        } else {
+            state.to_string()
+        };
+        let line = format!("{} {}", cs, zip).trim().to_string();
+        if line == "," || line.is_empty() { None } else { Some(line) }
+    }
+
     pub fn youth_name(&self) -> Option<String> {
         match (&self.youth_first_name, &self.youth_last_name) {
             (Some(first), Some(last)) => Some(format!("{} {}", first, last)),
@@ -679,6 +788,25 @@ impl Parent {
         }
     }
 }
+
+/// Priority order for youth positions of responsibility.
+pub const YOUTH_POSITION_PRIORITY: &[&str] = &[
+    "Senior Patrol Leader",
+    "Assistant Senior Patrol Leader",
+    "Troop Guide",
+    "Patrol Leader",
+    "Assistant Patrol Leader",
+    "Quartermaster",
+    "Scribe",
+    "Historian",
+    "Librarian",
+    "Chaplain Aide",
+    "Outdoor Ethics Guide",
+    "Den Chief",
+    "Instructor",
+    "Junior Assistant Scoutmaster",
+    "Bugler",
+];
 
 // Sorting options for scouts table
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -712,36 +840,223 @@ impl Youth {
     }
 
     pub fn rank_short(&self) -> String {
-        match self.current_rank.as_deref() {
-            Some("Scout") => "Sct".to_string(),
-            Some("Tenderfoot") => "TF".to_string(),
-            Some("Second Class") => "2C".to_string(),
-            Some("First Class") => "1C".to_string(),
-            Some(r) if r.contains("Star") => "Star".to_string(),
-            Some(r) if r.contains("Life") => "Life".to_string(),
-            Some(r) if r.contains("Eagle") => "Eagle".to_string(),
-            Some(r) => r.chars().take(4).collect(),
-            None => "Xovr".to_string(),
-        }
+        use super::advancement::ScoutRank;
+        ScoutRank::parse(self.current_rank.as_deref()).abbreviation().to_string()
     }
 
     pub fn position_display(&self) -> Option<String> {
-        self.position.clone().filter(|p| !p.is_empty() && p != "Scout")
+        self.position.clone().filter(|p| !p.is_empty() && p != POSITION_SCOUT)
+    }
+
+    /// Sort key based on YOUTH_POSITION_PRIORITY. Returns 999 for unknown/none.
+    pub fn position_sort_key(&self) -> usize {
+        match self.position.as_deref() {
+            Some(pos) if !pos.is_empty() && pos != POSITION_SCOUT && pos != PROGRAM_SCOUTS_BSA => {
+                YOUTH_POSITION_PRIORITY.iter().position(|&p| p == pos).unwrap_or(999)
+            }
+            _ => 999,
+        }
+    }
+
+    /// Display position with patrol name for PL/APL.
+    /// Returns None for "Scout", "Scouts BSA", or empty positions.
+    pub fn position_display_with_patrol(&self) -> Option<String> {
+        let pos = self.position.as_deref()?;
+        if pos.is_empty() || pos == POSITION_SCOUT || pos == PROGRAM_SCOUTS_BSA {
+            return None;
+        }
+        if (pos == POSITION_PATROL_LEADER || pos == POSITION_ASST_PATROL_LEADER)
+            && self.patrol_name.as_ref().map(|p| !p.is_empty()).unwrap_or(false)
+        {
+            Some(format!("{} ({})", pos, self.patrol_name.as_ref().unwrap()))
+        } else {
+            Some(pos.to_string())
+        }
+    }
+
+    /// Check if this youth matches a search query (case-insensitive).
+    /// Query should already be lowercased.
+    pub fn matches_search(&self, query_lowercase: &str) -> bool {
+        self.first_name.to_lowercase().contains(query_lowercase)
+            || self.last_name.to_lowercase().contains(query_lowercase)
+            || self.patrol_name.as_ref().map(|s| s.to_lowercase().contains(query_lowercase)).unwrap_or(false)
+            || self.current_rank.as_ref().map(|s| s.to_lowercase().contains(query_lowercase)).unwrap_or(false)
+            || self.email().as_ref().map(|s| s.to_lowercase().contains(query_lowercase)).unwrap_or(false)
+    }
+
+    /// Compare two youth by the given column, with name as tiebreaker.
+    pub fn cmp_by_column(a: &Youth, b: &Youth, column: ScoutSortColumn) -> Ordering {
+        use crate::utils::cmp_ignore_case;
+        use super::advancement::ScoutRank;
+
+        let name_cmp = || {
+            cmp_ignore_case(&a.last_name, &b.last_name)
+                .then_with(|| cmp_ignore_case(&a.first_name, &b.first_name))
+        };
+
+        match column {
+            ScoutSortColumn::Name => name_cmp(),
+            ScoutSortColumn::Rank => {
+                let rank_a = ScoutRank::parse(a.current_rank.as_deref());
+                let rank_b = ScoutRank::parse(b.current_rank.as_deref());
+                // Reversed so ascending shows highest rank first
+                rank_b.cmp(&rank_a).then_with(name_cmp)
+            }
+            ScoutSortColumn::Grade => a.grade.cmp(&b.grade).then_with(name_cmp),
+            ScoutSortColumn::Age => a.age().cmp(&b.age()).then_with(name_cmp),
+            ScoutSortColumn::Patrol => {
+                cmp_ignore_case(
+                    a.patrol_name.as_deref().unwrap_or(""),
+                    b.patrol_name.as_deref().unwrap_or(""),
+                )
+                .then_with(name_cmp)
+            }
+        }
     }
 }
 
-/// Format a raw phone number string into (123) 456-7890 format
-fn format_phone_number(phone: &str) -> String {
-    // Extract just the digits
-    let digits: String = phone.chars().filter(|c| c.is_ascii_digit()).collect();
+/// Build a sorted list of youth positions of responsibility.
+/// Filters out youth without positions, sorts by priority order.
+/// Returns (position_display, holder_display_name) pairs.
+pub fn youth_position_list(youth: &[Youth]) -> Vec<(String, String)> {
+    let mut positions: Vec<(usize, String, String)> = Vec::new();
+    for y in youth {
+        if let Some(display_pos) = y.position_display_with_patrol() {
+            positions.push((y.position_sort_key(), display_pos, y.display_name()));
+        }
+    }
+    positions.sort_by(|a, b| {
+        a.0.cmp(&b.0)
+            .then_with(|| a.1.cmp(&b.1))
+            .then_with(|| a.2.cmp(&b.2))
+    });
+    positions.into_iter().map(|(_, display, name)| (display, name)).collect()
+}
 
-    if digits.len() == 10 {
-        format!("({}) {}-{}", &digits[0..3], &digits[3..6], &digits[6..10])
-    } else if digits.len() == 11 && digits.starts_with('1') {
-        // Handle 1-prefixed numbers
-        format!("({}) {}-{}", &digits[1..4], &digits[4..7], &digits[7..11])
-    } else {
-        // Return original if not a standard US number
-        phone.to_string()
+/// Sorting options for adult table columns.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AdultSortColumn {
+    Name,
+    Role,
+    Email,
+}
+
+impl Adult {
+    /// Compare two adults by the given column, with name as tiebreaker.
+    pub fn cmp_by_column(a: &Adult, b: &Adult, column: AdultSortColumn) -> Ordering {
+        use crate::utils::cmp_ignore_case;
+        let name_cmp = || {
+            cmp_ignore_case(&a.last_name, &b.last_name)
+                .then_with(|| cmp_ignore_case(&a.first_name, &b.first_name))
+        };
+        match column {
+            AdultSortColumn::Name => name_cmp(),
+            AdultSortColumn::Role => {
+                cmp_ignore_case(&a.role(), &b.role()).then_with(name_cmp)
+            }
+            AdultSortColumn::Email => {
+                let ea = a.email().unwrap_or_default();
+                let eb = b.email().unwrap_or_default();
+                cmp_ignore_case(&ea, &eb).then_with(name_cmp)
+            }
+        }
+    }
+}
+
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn make_adult(position_trained: Option<&str>) -> Adult {
+        Adult {
+            person_guid: None, member_id: None, person_full_name: None,
+            first_name: "Jane".to_string(), middle_name: None, last_name: "Doe".to_string(),
+            nick_name: None, position: Some("Scoutmaster".to_string()), position_id: None,
+            key3: None, position_trained: position_trained.map(|s| s.to_string()),
+            ypt_status: None, ypt_completed_date: None, ypt_expired_date: None,
+            registrar_info: None, primary_email_info: None, primary_phone_info: None,
+            primary_address_info: None, user_id: None, email: None, phone_number: None,
+        }
+    }
+
+    fn make_youth(position: Option<&str>, patrol: Option<&str>) -> Youth {
+        Youth {
+            person_guid: None, member_id: None, person_full_name: None,
+            first_name: "John".to_string(), middle_name: None, last_name: "Smith".to_string(),
+            nick_name: None, gender: None, name_suffix: None, ethnicity: None,
+            grade: None, grade_id: None, position: position.map(|s| s.to_string()),
+            position_id: None, program_id: None, program: None, registrar_info: None,
+            primary_email_info: None, primary_phone_info: None, primary_address_info: None,
+            user_id: None, email: None, phone_number: None,
+            patrol_name: patrol.map(|s| s.to_string()), patrol_guid: None,
+            is_patrol_leader: None, current_rank: Some("First Class".to_string()),
+        }
+    }
+
+    #[test]
+    fn test_is_position_trained() {
+        assert_eq!(make_adult(Some("Trained")).is_position_trained(), Some(true));
+        assert_eq!(make_adult(Some("Y")).is_position_trained(), Some(true));
+        assert_eq!(make_adult(Some("Yes")).is_position_trained(), Some(true));
+        assert_eq!(make_adult(Some("Not Trained")).is_position_trained(), Some(false));
+        assert_eq!(make_adult(Some("N")).is_position_trained(), Some(false));
+        assert_eq!(make_adult(None).is_position_trained(), None);
+        assert_eq!(make_adult(Some("unknown")).is_position_trained(), None);
+    }
+
+    #[test]
+    fn test_position_trained_display() {
+        assert_eq!(make_adult(Some("Trained")).position_trained_display(), "Trained");
+        assert_eq!(make_adult(Some("Y")).position_trained_display(), "Trained");
+        assert_eq!(make_adult(Some("Not Trained")).position_trained_display(), "Not Trained");
+        assert_eq!(make_adult(None).position_trained_display(), "-");
+    }
+
+    #[test]
+    fn test_position_sort_key() {
+        let spl = make_youth(Some("Senior Patrol Leader"), None);
+        let pl = make_youth(Some("Patrol Leader"), None);
+        let scout = make_youth(Some("Scout"), None);
+        let none = make_youth(None, None);
+
+        assert_eq!(spl.position_sort_key(), 0);
+        assert_eq!(pl.position_sort_key(), 3);
+        assert_eq!(scout.position_sort_key(), 999);
+        assert_eq!(none.position_sort_key(), 999);
+    }
+
+    #[test]
+    fn test_position_display_with_patrol() {
+        let pl = make_youth(Some("Patrol Leader"), Some("Eagle"));
+        assert_eq!(pl.position_display_with_patrol(), Some("Patrol Leader (Eagle)".to_string()));
+
+        let spl = make_youth(Some("Senior Patrol Leader"), Some("Eagle"));
+        assert_eq!(spl.position_display_with_patrol(), Some("Senior Patrol Leader".to_string()));
+
+        let scout = make_youth(Some("Scout"), None);
+        assert_eq!(scout.position_display_with_patrol(), None);
+
+        let none = make_youth(None, None);
+        assert_eq!(none.position_display_with_patrol(), None);
+    }
+
+    #[test]
+    fn test_youth_matches_search() {
+        let youth = make_youth(Some("Patrol Leader"), Some("Eagle"));
+        assert!(youth.matches_search("john"));
+        assert!(youth.matches_search("smith"));
+        assert!(youth.matches_search("eagle"));
+        assert!(youth.matches_search("first class"));
+        assert!(!youth.matches_search("bob"));
+    }
+
+    #[test]
+    fn test_adult_matches_search() {
+        let adult = make_adult(Some("Trained"));
+        assert!(adult.matches_search("jane"));
+        assert!(adult.matches_search("doe"));
+        assert!(adult.matches_search("scoutmaster"));
+        assert!(!adult.matches_search("bob"));
     }
 }

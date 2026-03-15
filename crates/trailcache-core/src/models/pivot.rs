@@ -100,10 +100,10 @@ pub fn group_youth_by_rank(
     }
 
     if !crossover.is_empty() {
-        by_rank.insert("Crossover".to_string(), crossover);
+        by_rank.insert(ScoutRank::Unknown.display_name().to_string(), crossover);
     }
 
-    // Sort scouts within each rank: completed first, then awarded, newest to oldest
+    // Sort scouts within each rank: awarded first (by date desc), then completed (by date desc), then in-progress (by name)
     for scouts in by_rank.values_mut() {
         scouts.sort_by(|a, b| {
             match (&a.rank, &b.rank) {
@@ -111,21 +111,25 @@ pub fn group_youth_by_rank(
                 (None, Some(_)) => std::cmp::Ordering::Greater,
                 (Some(_), None) => std::cmp::Ordering::Less,
                 (Some(ar), Some(br)) => {
-                    let aa = ar.is_awarded();
-                    let ba = br.is_awarded();
-                    if aa != ba {
-                        return aa.cmp(&ba); // completed (not awarded) first
+                    let status_order = |r: &RankProgress| -> u8 {
+                        if r.is_awarded() { 2 } else if r.is_completed() { 1 } else { 0 }
+                    };
+                    let sa = status_order(ar);
+                    let sb = status_order(br);
+                    if sa != sb {
+                        return sb.cmp(&sa); // awarded first
                     }
-                    let da = if aa {
-                        ar.date_awarded.as_deref().unwrap_or("")
-                    } else {
-                        ar.date_completed.as_deref().unwrap_or("")
-                    };
-                    let db = if ba {
-                        br.date_awarded.as_deref().unwrap_or("")
-                    } else {
-                        br.date_completed.as_deref().unwrap_or("")
-                    };
+                    if sa == 0 {
+                        // Both in-progress: sort by name
+                        return a.display_name.cmp(&b.display_name);
+                    }
+                    // Both completed or both awarded: sort by date desc
+                    let da = ar.date_awarded.as_deref()
+                        .or(ar.date_completed.as_deref())
+                        .unwrap_or("");
+                    let db = br.date_awarded.as_deref()
+                        .or(br.date_completed.as_deref())
+                        .unwrap_or("");
                     db.cmp(da)
                 }
             }
@@ -208,20 +212,24 @@ pub fn group_youth_by_badge(
         }
     }
 
-    // Sort scouts within each badge
+    // Sort scouts within each badge: awarded first (by date desc), then completed (by date desc), then in-progress (by % desc)
     for (_, scouts) in by_badge.values_mut() {
         scouts.sort_by(|a, b| {
-            let a_done = a.badge.is_completed() || a.badge.is_awarded();
-            let b_done = b.badge.is_completed() || b.badge.is_awarded();
-            if a_done != b_done {
-                return a_done.cmp(&b_done); // in-progress first
+            let status_order = |s: &BadgeGroupEntry| -> u8 {
+                if s.badge.is_awarded() { 2 } else if s.badge.is_completed() { 1 } else { 0 }
+            };
+            let sa = status_order(a);
+            let sb = status_order(b);
+            if sa != sb {
+                return sb.cmp(&sa); // awarded first
             }
-            if !a_done {
+            if sa == 0 {
+                // Both in-progress: sort by percent desc
                 let pa = a.badge.percent_completed.unwrap_or(0.0);
                 let pb = b.badge.percent_completed.unwrap_or(0.0);
                 pb.partial_cmp(&pa).unwrap_or(std::cmp::Ordering::Equal)
             } else {
-                // Completed/awarded: sort by date desc
+                // Both completed/awarded: sort by date desc
                 let da = a.badge.awarded_date.as_deref()
                     .or(a.badge.date_completed.as_deref())
                     .unwrap_or("");
@@ -243,4 +251,88 @@ pub fn group_youth_by_badge(
         .collect();
     groups.sort_by(|a, b| a.badge_name.to_lowercase().cmp(&b.badge_name.to_lowercase()));
     groups
+}
+
+// ============================================================================
+// Badge/Rank List Aggregation
+// ============================================================================
+
+/// Summary of a badge across all youth (name, eagle-required flag, count).
+#[derive(Debug, Clone)]
+pub struct BadgeListEntry {
+    pub name: String,
+    pub is_eagle_required: bool,
+    pub count: usize,
+}
+
+/// Summary of a rank across all youth (name, count).
+#[derive(Debug, Clone)]
+pub struct RankListEntry {
+    pub name: String,
+    pub count: usize,
+}
+
+/// Build a sorted list of badges with counts.
+/// If `sort_by_count`, sorts by count desc with name tiebreaker.
+/// Otherwise sorts by name (case-insensitive).
+pub fn badge_list(
+    youth: &[Youth],
+    all_badges: &std::collections::HashMap<i64, Vec<MeritBadgeProgress>>,
+    sort_by_count: bool,
+) -> Vec<BadgeListEntry> {
+    let grouped = group_youth_by_badge(youth, all_badges);
+    let mut result: Vec<BadgeListEntry> = grouped
+        .into_iter()
+        .map(|g| BadgeListEntry {
+            name: g.badge_name,
+            is_eagle_required: g.is_eagle_required,
+            count: g.scouts.len(),
+        })
+        .collect();
+
+    if sort_by_count {
+        result.sort_by(|a, b| {
+            b.count.cmp(&a.count)
+                .then_with(|| a.name.to_lowercase().cmp(&b.name.to_lowercase()))
+        });
+    } else {
+        result.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
+    }
+
+    result
+}
+
+/// Build a sorted list of ranks with counts.
+/// If `sort_by_count`, sorts by count desc with rank-order tiebreaker.
+/// Otherwise sorts by canonical rank order.
+pub fn rank_list(
+    youth: &[Youth],
+    all_ranks: &std::collections::HashMap<i64, Vec<RankProgress>>,
+    sort_by_count: bool,
+) -> Vec<RankListEntry> {
+    let grouped = group_youth_by_rank(youth, all_ranks);
+    let mut result: Vec<RankListEntry> = grouped
+        .into_iter()
+        .map(|g| RankListEntry {
+            name: g.rank_name,
+            count: g.scouts.len(),
+        })
+        .collect();
+
+    if sort_by_count {
+        result.sort_by(|a, b| {
+            b.count.cmp(&a.count)
+                .then_with(|| {
+                    ScoutRank::parse(Some(&a.name)).order()
+                        .cmp(&ScoutRank::parse(Some(&b.name)).order())
+                })
+        });
+    } else {
+        result.sort_by(|a, b| {
+            ScoutRank::parse(Some(&a.name)).order()
+                .cmp(&ScoutRank::parse(Some(&b.name)).order())
+        });
+    }
+
+    result
 }

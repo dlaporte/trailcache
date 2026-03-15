@@ -5,19 +5,20 @@
 <svelte:head>
 	<style>
 		:root {
-			--bg: #1a1b26;
-			--bg-surface: #24283b;
-			--bg-hover: #2f3349;
-			--border: #3b4261;
-			--text: #c0caf5;
-			--text-muted: #565f89;
+			--bg: #16181e;
+			--bg-surface: #1e2028;
+			--bg-hover: #282a34;
+			--border: #363840;
+			--text: #d0d4dc;
+			--text-muted: #808080;
 			--text-bright: #ffffff;
-			--accent: #7aa2f7;
-			--accent-hover: #89b4fa;
-			--success: #9ece6a;
-			--warning: #e0af68;
-			--error: #f7768e;
-			--eagle: #bb9af7;
+			--accent: #4080c0;
+			--accent-hover: #5090d0;
+			--gold: #c0a040;
+			--success: #60a060;
+			--warning: #c0a040;
+			--error: #c04040;
+			--eagle: #a080c0;
 			font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
 			color-scheme: dark;
 		}

@@ -26,7 +26,7 @@ use trailcache_core::models::{
     ReadyToAward, ScoutSortColumn, UnitInfo, Youth,
 };
 use trailcache_core::models::advancement::CounselorInfo;
-use trailcache_core::utils::{cmp_ignore_case, contains_ignore_case};
+
 
 use ratatui::layout::Rect;
 use ratatui::widgets::TableState;
@@ -367,9 +367,6 @@ pub struct App {
     // Offline mode - when true, only use cached data
     pub offline_mode: bool,
 
-    // Flag to trigger requirements fetch after main refresh completes
-    pending_offline_requirements_fetch: bool,
-
     // Offline caching progress tracking
     pub caching_in_progress: bool,
     pub caching_current: usize,
@@ -523,7 +520,6 @@ impl App {
             status_message: None,
             cache_ages: Default::default(),
             offline_mode,
-            pending_offline_requirements_fetch: false,
 
             caching_in_progress: false,
             caching_current: 0,
@@ -640,7 +636,7 @@ impl App {
                 self.cache.set_password(&password, org_guid);
 
                 // Try to load cache to verify password is correct
-                if let Err(e) = self.load_from_cache().await {
+                if let Err(e) = self.load_from_cache() {
                     self.login_error = Some("Failed to decrypt cache. Wrong password?".to_string());
                     return Err(e);
                 }
@@ -692,7 +688,7 @@ impl App {
                 }
 
                 // Load any existing cache and refresh
-                let _ = self.load_from_cache().await;
+                let _ = self.load_from_cache();
                 if self.is_cache_stale() {
                     self.refresh_all_background().await;
                 }
@@ -729,7 +725,7 @@ impl App {
     // =========================================================================
 
     /// Load all data from cache
-    pub async fn load_from_cache(&mut self) -> Result<()> {
+    pub fn load_from_cache(&mut self) -> Result<()> {
         info!(cache_dir = ?self.cache.cache_dir(), "Loading from cache");
 
         match self.cache.load_youth() {
@@ -771,7 +767,7 @@ impl App {
         }
 
         if let Ok(Some(cached)) = self.cache.load_unit_info() {
-            self.unit_info = Some(cached.data);
+            self.unit_info = Some(cached.data.with_computed_fields());
         }
 
         if let Ok(Some(cached)) = self.cache.load_key3() {
@@ -886,6 +882,7 @@ impl App {
         };
 
         let tx = self.refresh_tx.clone();
+        let cache = self.cache.clone();
 
         // Set caching in progress state
         self.caching_in_progress = true;
@@ -895,10 +892,8 @@ impl App {
         self.status_message = Some("Caching data for offline mode: Starting...".to_string());
 
         tokio::spawn(async move {
-            Self::execute_offline_caching(tx, org_guid, token, user_id).await;
+            Self::execute_offline_caching(tx, org_guid, token, user_id, cache).await;
         });
-
-        self.pending_offline_requirements_fetch = true;
     }
 
     /// Exit offline mode - resume normal online operation.
@@ -950,8 +945,6 @@ impl App {
     ) {
         info!("Background refresh task started");
 
-        // Create one base API client and clone for parallel tasks.
-        // Cloning is cheap - shares the underlying connection pool via Arc.
         let base_api = match ApiClient::new() {
             Ok(api) => api,
             Err(e) => {
@@ -961,22 +954,19 @@ impl App {
             }
         };
 
-        // Clone the base client for each parallel fetch.
-        // This is very efficient - both client and token use Arc internally,
-        // so cloning is just incrementing reference counts (no String allocation).
-        let api1 = base_api.with_token(Arc::clone(&token));
-        let api2 = base_api.with_token(Arc::clone(&token));
-        let api3 = base_api.with_token(Arc::clone(&token));
-        let api4 = base_api.with_token(Arc::clone(&token));
-        let api5 = base_api.with_token(Arc::clone(&token));
-        let api6 = base_api.with_token(Arc::clone(&token));
-        let api7 = base_api.with_token(Arc::clone(&token));
-        let api8 = base_api.with_token(Arc::clone(&token));
-        let api9 = base_api.with_token(Arc::clone(&token));
-        let api10 = base_api.with_token(Arc::clone(&token));
+        // Create API clients for parallel fetching.
+        // The TUI's process_refresh_result handles caching, so we just fetch here.
+        let api = base_api.with_token(Arc::clone(&token));
+        let api2 = api.clone();
+        let api3 = api.clone();
+        let api4 = api.clone();
+        let api5 = api.clone();
+        let api6 = api.clone();
+        let api7 = api.clone();
+        let api8 = api.clone();
+        let api9 = api.clone();
+        let api10 = api.clone();
 
-        // Clone org_guid for each task
-        let org1 = Arc::clone(&org_guid);
         let org2 = Arc::clone(&org_guid);
         let org3 = Arc::clone(&org_guid);
         let org4 = Arc::clone(&org_guid);
@@ -987,7 +977,7 @@ impl App {
 
         // Fetch all main data in parallel
         let (youth_res, adults_res, parents_res, patrols_res, events_res, dashboard_res, ready_res, key3_res, pin_res, profile_res) = tokio::join!(
-            api1.fetch_youth(&org1),
+            api.fetch_youth(&org_guid),
             api2.fetch_adults(&org2),
             api3.fetch_parents(&org3),
             api4.fetch_patrols(&org4),
@@ -999,11 +989,14 @@ impl App {
             api10.fetch_org_profile(&org_guid),
         );
 
-        // Extract youth user IDs before moving youth_res (for advancement fetch later)
+        // Extract youth user IDs before moving youth_res
         let youth_user_ids: Vec<i64> = youth_res
             .as_ref()
             .map(|list| list.iter().filter_map(|y| y.user_id).collect())
             .unwrap_or_default();
+
+        // Deduplicate adults before sending
+        let adults_res = adults_res.map(Adult::deduplicate);
 
         // Process and send results
         Self::send_fetch_result(&tx, "Youth", youth_res, RefreshResult::Youth).await;
@@ -1019,7 +1012,7 @@ impl App {
         // Handle events with detail fetches
         Self::handle_events_refresh(&tx, events_res, &token).await;
 
-        // Fetch commissioners separately using a clone of the base client
+        // Fetch commissioners separately
         let api_commissioners = base_api.with_token(Arc::clone(&token));
         match api_commissioners.fetch_commissioners(&org_guid).await {
             Ok(commissioners) => {
@@ -1031,30 +1024,25 @@ impl App {
             }
         }
 
-        // Fetch rank and merit badge progress for all youth (for Ranks/Badges tabs)
+        // Fetch rank and merit badge progress for all youth (TUI-specific)
         Self::handle_all_youth_advancement_refresh(&tx, &youth_user_ids, &token).await;
 
         info!("Background refresh complete");
         Self::send_result(&tx, RefreshResult::RefreshComplete).await;
     }
 
-    /// Execute offline caching with progress updates.
-    /// Similar to execute_background_refresh but sends CachingProgress updates.
+    /// Execute offline caching using the shared core function.
+    /// Delegates all fetching + caching to `trailcache_core::cache::cache_all_for_offline`,
+    /// forwarding progress via the refresh channel.
     async fn execute_offline_caching(
         tx: mpsc::Sender<RefreshResult>,
         org_guid: Arc<String>,
         token: Arc<String>,
         user_id: i64,
+        cache: CacheManager,
     ) {
         info!("Offline caching task started");
 
-        // Calculate total items to cache
-        // Base items: youth, adults, parents, patrols, events, dashboard, ready_to_award, key3, pin, profile, commissioners
-        let base_items = 11;
-
-        Self::send_result(&tx, RefreshResult::CachingProgress(0, base_items, "Fetching roster data".to_string())).await;
-
-        // Create API client
         let base_api = match ApiClient::new() {
             Ok(api) => api,
             Err(e) => {
@@ -1064,140 +1052,30 @@ impl App {
             }
         };
 
-        let api = base_api.with_token(Arc::clone(&token));
-        let mut completed = 0;
+        let api = base_api.with_token(token);
 
-        // Fetch youth
-        Self::send_result(&tx, RefreshResult::CachingProgress(completed, base_items, "Fetching scouts".to_string())).await;
-        let youth_res = api.fetch_youth(&org_guid).await;
-        let youth_user_ids: Vec<i64> = youth_res
-            .as_ref()
-            .map(|list| list.iter().filter_map(|y| y.user_id).collect())
-            .unwrap_or_default();
-        Self::send_fetch_result(&tx, "Youth", youth_res, RefreshResult::Youth).await;
-        completed += 1;
+        let tx_progress = tx.clone();
+        let result = trailcache_core::cache::cache_all_for_offline(
+            &api,
+            &cache,
+            &org_guid,
+            user_id,
+            |progress| {
+                // Forward progress to the TUI's refresh channel (best-effort)
+                let _ = tx_progress.try_send(RefreshResult::CachingProgress(
+                    progress.current as usize,
+                    progress.total as usize,
+                    progress.description,
+                ));
+            },
+        )
+        .await;
 
-        // Fetch adults
-        Self::send_result(&tx, RefreshResult::CachingProgress(completed, base_items, "Fetching adults".to_string())).await;
-        let adults_res = api.fetch_adults(&org_guid).await;
-        Self::send_fetch_result(&tx, "Adults", adults_res, RefreshResult::Adults).await;
-        completed += 1;
-
-        // Fetch parents
-        Self::send_result(&tx, RefreshResult::CachingProgress(completed, base_items, "Fetching parents".to_string())).await;
-        let parents_res = api.fetch_parents(&org_guid).await;
-        Self::send_fetch_result_or_empty(&tx, "Parents", parents_res, RefreshResult::Parents, vec![]).await;
-        completed += 1;
-
-        // Fetch patrols
-        Self::send_result(&tx, RefreshResult::CachingProgress(completed, base_items, "Fetching patrols".to_string())).await;
-        let patrols_res = api.fetch_patrols(&org_guid).await;
-        Self::send_fetch_result_or_empty(&tx, "Patrols", patrols_res, RefreshResult::Patrols, vec![]).await;
-        completed += 1;
-
-        // Fetch events
-        Self::send_result(&tx, RefreshResult::CachingProgress(completed, base_items, "Fetching events".to_string())).await;
-        let events_res = api.fetch_events(user_id).await;
-        if let Ok(ref events) = events_res {
-            Self::send_result(&tx, RefreshResult::Events(events.clone())).await;
-        }
-        completed += 1;
-
-        // Fetch dashboard
-        Self::send_result(&tx, RefreshResult::CachingProgress(completed, base_items, "Fetching advancement dashboard".to_string())).await;
-        let dashboard_res = api.fetch_advancement_dashboard(&org_guid).await;
-        Self::send_fetch_result_or_default(&tx, "Dashboard", dashboard_res, RefreshResult::AdvancementDashboard).await;
-        completed += 1;
-
-        // Fetch ready to award
-        Self::send_result(&tx, RefreshResult::CachingProgress(completed, base_items, "Fetching ready to award".to_string())).await;
-        let ready_res = api.fetch_ready_to_award(&org_guid).await;
-        Self::send_fetch_result_or_empty(&tx, "ReadyToAward", ready_res, RefreshResult::ReadyToAward, vec![]).await;
-        completed += 1;
-
-        // Fetch key3
-        Self::send_result(&tx, RefreshResult::CachingProgress(completed, base_items, "Fetching unit leadership".to_string())).await;
-        let key3_res = api.fetch_key3(&org_guid).await;
-        Self::send_key3_result(&tx, key3_res).await;
-        completed += 1;
-
-        // Fetch unit pin info
-        Self::send_result(&tx, RefreshResult::CachingProgress(completed, base_items, "Fetching unit info".to_string())).await;
-        let pin_res = api.fetch_unit_pin(&org_guid).await;
-        Self::send_pin_result(&tx, pin_res).await;
-        completed += 1;
-
-        // Fetch org profile
-        Self::send_result(&tx, RefreshResult::CachingProgress(completed, base_items, "Fetching organization profile".to_string())).await;
-        let profile_res = api.fetch_org_profile(&org_guid).await;
-        Self::send_profile_result(&tx, profile_res).await;
-        completed += 1;
-
-        // Fetch commissioners
-        Self::send_result(&tx, RefreshResult::CachingProgress(completed, base_items, "Fetching commissioners".to_string())).await;
-        match api.fetch_commissioners(&org_guid).await {
-            Ok(commissioners) => {
-                Self::send_result(&tx, RefreshResult::Commissioners(commissioners)).await;
-            }
-            Err(e) => {
-                debug!(error = %e, "Failed to fetch commissioners");
-            }
+        match result {
+            Ok(msg) => info!("{}", msg),
+            Err(e) => error!(error = %e, "Offline caching failed"),
         }
 
-        // Now fetch per-youth data with progress
-        let total_youth = youth_user_ids.len();
-        if total_youth > 0 {
-            let per_youth_total = total_youth * 3; // ranks, badges, leadership for each youth
-            let mut per_youth_completed = 0;
-
-            Self::send_result(&tx, RefreshResult::CachingProgress(
-                per_youth_completed,
-                per_youth_total,
-                format!("Fetching advancement for {} scouts", total_youth)
-            )).await;
-
-            const MAX_CONCURRENT: usize = 5;
-            for chunk in youth_user_ids.chunks(MAX_CONCURRENT) {
-                let futures: Vec<_> = chunk
-                    .iter()
-                    .map(|&uid| {
-                        let api = api.clone();
-                        async move {
-                            let ranks = api.fetch_youth_ranks(uid).await.ok();
-                            let badges = api.fetch_youth_merit_badges(uid).await.ok();
-                            let leadership = api.fetch_youth_leadership(uid).await.ok();
-                            (uid, ranks, badges, leadership)
-                        }
-                    })
-                    .collect();
-
-                let results = futures::future::join_all(futures).await;
-                for (uid, ranks, badges, leadership) in results {
-                    if let Some(r) = ranks {
-                        Self::send_result(&tx, RefreshResult::YouthRanks(uid, r)).await;
-                    }
-                    per_youth_completed += 1;
-
-                    if let Some(b) = badges {
-                        Self::send_result(&tx, RefreshResult::YouthMeritBadges(uid, b)).await;
-                    }
-                    per_youth_completed += 1;
-
-                    if let Some(l) = leadership {
-                        Self::send_result(&tx, RefreshResult::YouthLeadership(uid, l)).await;
-                    }
-                    per_youth_completed += 1;
-
-                    Self::send_result(&tx, RefreshResult::CachingProgress(
-                        per_youth_completed,
-                        per_youth_total,
-                        "Caching scout advancement data".to_string()
-                    )).await;
-                }
-            }
-        }
-
-        info!("Offline caching complete");
         Self::send_result(&tx, RefreshResult::CachingComplete).await;
     }
 
@@ -1255,112 +1133,6 @@ impl App {
         }
 
         debug!("All youth advancement fetching complete");
-    }
-
-    /// Fetch all requirements for offline mode.
-    /// This fetches rank and badge requirements for all youth's active ranks and badges.
-    async fn fetch_all_requirements_for_offline(
-        tx: &mpsc::Sender<RefreshResult>,
-        all_youth_ranks: &HashMap<i64, Vec<RankProgress>>,
-        all_youth_badges: &HashMap<i64, Vec<MeritBadgeProgress>>,
-        token: &Arc<String>,
-    ) {
-        info!("Fetching all requirements for offline mode");
-
-        // Create API client
-        let api = match create_authenticated_api(token.to_string()) {
-            Ok(api) => api,
-            Err(e) => {
-                error!(error = %e, "Failed to create API client for requirements fetch");
-                return;
-            }
-        };
-
-        // Collect all rank requirements to fetch (user_id, rank_id)
-        // Fetch ALL ranks for complete offline access
-        let mut rank_reqs_to_fetch: Vec<(i64, i64)> = Vec::new();
-        for (&user_id, ranks) in all_youth_ranks.iter() {
-            for rank in ranks {
-                rank_reqs_to_fetch.push((user_id, rank.rank_id));
-            }
-        }
-
-        // Collect all badge requirements to fetch (user_id, badge_id)
-        // Fetch ALL badges for complete offline access
-        let mut badge_reqs_to_fetch: Vec<(i64, i64)> = Vec::new();
-        for (&user_id, badges) in all_youth_badges.iter() {
-            for badge in badges {
-                badge_reqs_to_fetch.push((user_id, badge.id));
-            }
-        }
-
-        let total_reqs = rank_reqs_to_fetch.len() + badge_reqs_to_fetch.len();
-        let mut completed = 0;
-
-        info!(
-            rank_count = rank_reqs_to_fetch.len(),
-            badge_count = badge_reqs_to_fetch.len(),
-            "Fetching requirements for offline"
-        );
-
-        Self::send_result(tx, RefreshResult::CachingProgress(
-            0, total_reqs, "Caching rank requirements".to_string()
-        )).await;
-
-        // Fetch rank requirements with limited concurrency
-        const MAX_CONCURRENT: usize = 5;
-        for chunk in rank_reqs_to_fetch.chunks(MAX_CONCURRENT) {
-            let futures: Vec<_> = chunk
-                .iter()
-                .map(|&(user_id, rank_id)| {
-                    let api = api.clone();
-                    async move {
-                        let reqs = api.fetch_rank_requirements(user_id, rank_id).await.ok();
-                        (user_id, rank_id, reqs)
-                    }
-                })
-                .collect();
-
-            let results = futures::future::join_all(futures).await;
-            for (user_id, rank_id, reqs) in results {
-                if let Some(reqs) = reqs {
-                    Self::send_result(tx, RefreshResult::RankRequirements(user_id, rank_id, reqs)).await;
-                }
-                completed += 1;
-            }
-
-            Self::send_result(tx, RefreshResult::CachingProgress(
-                completed, total_reqs, "Caching rank requirements".to_string()
-            )).await;
-        }
-
-        // Fetch badge requirements with limited concurrency
-        for chunk in badge_reqs_to_fetch.chunks(MAX_CONCURRENT) {
-            let futures: Vec<_> = chunk
-                .iter()
-                .map(|&(user_id, badge_id)| {
-                    let api = api.clone();
-                    async move {
-                        let result = api.fetch_badge_requirements(user_id, badge_id).await.ok();
-                        (user_id, badge_id, result)
-                    }
-                })
-                .collect();
-
-            let results = futures::future::join_all(futures).await;
-            for (user_id, badge_id, result) in results {
-                if let Some((reqs, version, counselor)) = result {
-                    Self::send_result(tx, RefreshResult::BadgeRequirements(user_id, badge_id, reqs, version, counselor)).await;
-                }
-                completed += 1;
-            }
-
-            Self::send_result(tx, RefreshResult::CachingProgress(
-                completed, total_reqs, "Caching badge requirements".to_string()
-            )).await;
-        }
-
-        info!("All requirements fetching complete");
     }
 
     /// Helper to send a successful fetch result or an error
@@ -1568,13 +1340,13 @@ impl App {
                 self.cache_ages = self.cache.get_cache_ages();
             }
             RefreshResult::Adults(data) => {
+                // Data is already deduplicated by execute_background_refresh
                 info!(count = data.len(), "Processing Adults result - saving to cache");
-                let deduped = Self::deduplicate_adults(data);
-                match self.cache.save_adults(&deduped) {
+                match self.cache.save_adults(&data) {
                     Ok(()) => info!("Adults cache saved successfully"),
                     Err(e) => error!(error = %e, "Failed to cache adults data"),
                 }
-                self.adults = deduped;
+                self.adults = data;
             }
             RefreshResult::Parents(data) => {
                 if let Err(e) = self.cache.save_parents(&data) {
@@ -1625,7 +1397,7 @@ impl App {
                 if let Err(e) = self.cache.save_unit_info(&data) {
                     warn!(error = %e, "Failed to cache unit pin info");
                 }
-                self.unit_info = Some(data);
+                self.unit_info = Some(data.with_computed_fields());
             }
             RefreshResult::OrgProfile(data) => {
                 if let Err(e) = self.cache.save_org_profile(&data) {
@@ -1692,18 +1464,7 @@ impl App {
                 }
             }
             RefreshResult::YouthLeadership(user_id, mut data) => {
-                // Sort: current positions first, then by start date descending
-                data.sort_by(|a, b| {
-                    // Current positions come first
-                    match (a.is_current(), b.is_current()) {
-                        (true, false) => std::cmp::Ordering::Less,
-                        (false, true) => std::cmp::Ordering::Greater,
-                        _ => {
-                            // Sort by start date descending (most recent first)
-                            b.start_date.cmp(&a.start_date)
-                        }
-                    }
-                });
+                LeadershipPosition::sort_for_display(&mut data);
                 if let Err(e) = self.cache.save_youth_leadership(user_id, &data) {
                     warn!(error = %e, "Failed to cache youth leadership");
                 }
@@ -1716,18 +1477,7 @@ impl App {
                 }
             }
             RefreshResult::YouthAwards(user_id, mut data) => {
-                // Sort: awarded first, then by date descending
-                data.sort_by(|a, b| {
-                    // Awarded items come first
-                    match (a.is_awarded(), b.is_awarded()) {
-                        (true, false) => std::cmp::Ordering::Less,
-                        (false, true) => std::cmp::Ordering::Greater,
-                        _ => {
-                            // Sort by awarded date descending (most recent first)
-                            b.date_awarded.cmp(&a.date_awarded)
-                        }
-                    }
-                });
+                Award::sort_for_display(&mut data);
                 if let Err(e) = self.cache.save_youth_awards(user_id, &data) {
                     warn!(error = %e, "Failed to cache youth awards");
                 }
@@ -1771,33 +1521,10 @@ impl App {
                 }
             }
             RefreshResult::RefreshComplete => {
-                // Check if we need to fetch all requirements for offline mode
-                if self.pending_offline_requirements_fetch {
-                    self.pending_offline_requirements_fetch = false;
-                    self.status_message = Some("Caching requirements for offline...".to_string());
-
-                    // Clone data needed for the async task
-                    let tx = self.refresh_tx.clone();
-                    let all_youth_ranks = self.all_youth_ranks.clone();
-                    let all_youth_badges = self.all_youth_badges.clone();
-                    let token = match self.session.token() {
-                        Some(t) => Arc::new(t.to_string()),
-                        None => {
-                            self.status_message = Some("Offline mode ready (no requirements cached)".to_string());
-                            return;
-                        }
-                    };
-
-                    tokio::spawn(async move {
-                        Self::fetch_all_requirements_for_offline(&tx, &all_youth_ranks, &all_youth_badges, &token).await;
-                        Self::send_result(&tx, RefreshResult::RefreshComplete).await;
-                    });
-                } else {
-                    // Only clear status if it's a progress message, preserve errors
-                    if let Some(ref msg) = self.status_message {
-                        if !msg.starts_with("Error:") {
-                            self.status_message = None;
-                        }
+                // Only clear status if it's a progress message, preserve errors
+                if let Some(ref msg) = self.status_message {
+                    if !msg.starts_with("Error:") {
+                        self.status_message = None;
                     }
                 }
             }
@@ -1809,63 +1536,26 @@ impl App {
                 self.status_message = Some(format!("Caching: {} ({}%)", description, pct));
             }
             RefreshResult::CachingComplete => {
-                // Check if we still need to fetch detailed requirements
-                if self.pending_offline_requirements_fetch {
-                    self.pending_offline_requirements_fetch = false;
-                    self.status_message = Some("Caching detailed requirements for offline...".to_string());
-
-                    // Clone data needed for the async task
-                    let tx = self.refresh_tx.clone();
-                    let all_youth_ranks = self.all_youth_ranks.clone();
-                    let all_youth_badges = self.all_youth_badges.clone();
-                    let token = match self.session.token() {
-                        Some(t) => Arc::new(t.to_string()),
-                        None => {
-                            // No token - finish without requirements
-                            self.caching_in_progress = false;
-                            self.offline_mode = true;
-                            self.config.offline_mode = true;
-                            let _ = self.config.save();
-                            self.status_message = Some("Offline mode ready (no requirements cached)".to_string());
-                            return;
-                        }
-                    };
-
-                    tokio::spawn(async move {
-                        Self::fetch_all_requirements_for_offline(&tx, &all_youth_ranks, &all_youth_badges, &token).await;
-                        // Signal that requirements caching is done
-                        Self::send_result(&tx, RefreshResult::CachingComplete).await;
-                    });
-                } else {
-                    // All done - verify cache files exist before enabling offline mode
-                    let missing = self.cache.verify_cache();
-                    if !missing.is_empty() {
-                        error!(missing_files = ?missing, cache_dir = ?self.cache.cache_dir(), "Cache verification failed");
-                        self.caching_in_progress = false;
-                        self.status_message = Some(format!(
-                            "Caching failed - missing: {}. Check logs.",
-                            missing.join(", ")
-                        ));
-                        return;
-                    }
-
-                    // Enable offline mode
-                    self.caching_in_progress = false;
-                    self.offline_mode = true;
-                    self.config.offline_mode = true;
-                    if let Err(e) = self.config.save() {
-                        warn!(error = %e, "Failed to save config after offline caching");
-                        self.status_message = Some("Caching complete but config save failed".to_string());
-                        return;
-                    }
-
-                    // Log success with cache location for debugging
-                    info!(cache_dir = ?self.cache.cache_dir(), youth_count = self.youth.len(), "Offline caching complete");
-                    self.status_message = Some(format!(
-                        "Offline mode ready - {} scouts cached",
-                        self.youth.len()
-                    ));
+                // Reload in-memory state from the freshly-populated cache
+                if let Err(e) = self.load_from_cache() {
+                    warn!(error = %e, "Failed to reload from cache after offline caching");
                 }
+
+                // Enable offline mode
+                self.caching_in_progress = false;
+                self.offline_mode = true;
+                self.config.offline_mode = true;
+                if let Err(e) = self.config.save() {
+                    warn!(error = %e, "Failed to save config after offline caching");
+                    self.status_message = Some("Caching complete but config save failed".to_string());
+                    return;
+                }
+
+                info!(cache_dir = ?self.cache.cache_dir(), youth_count = self.youth.len(), "Offline caching complete");
+                self.status_message = Some(format!(
+                    "Offline mode ready - {} scouts cached",
+                    self.youth.len()
+                ));
             }
             RefreshResult::Error(msg) => {
                 // Show error and log it
@@ -2293,20 +1983,7 @@ impl App {
     /// Check if a youth matches the search query.
     /// Query should already be lowercased.
     fn youth_matches_search(youth: &Youth, query: &str) -> bool {
-        contains_ignore_case(&youth.first_name, query)
-            || contains_ignore_case(&youth.last_name, query)
-            || youth.patrol_name
-                .as_ref()
-                .map(|s| contains_ignore_case(s, query))
-                .unwrap_or(false)
-            || youth.current_rank
-                .as_ref()
-                .map(|s| contains_ignore_case(s, query))
-                .unwrap_or(false)
-            || youth.email()
-                .as_ref()
-                .map(|s| contains_ignore_case(s, query))
-                .unwrap_or(false)
+        youth.matches_search(query)
     }
 
     /// Get youth sorted by current sort settings, filtered by search query
@@ -2320,36 +1997,8 @@ impl App {
         }
 
         sorted.sort_by(|a, b| {
-            // Case-insensitive name comparison without allocation
-            let name_cmp = |x: &Youth, y: &Youth| {
-                cmp_ignore_case(&x.last_name, &y.last_name)
-                    .then_with(|| cmp_ignore_case(&x.first_name, &y.first_name))
-            };
-
-            let cmp = match self.scout_sort_column {
-                ScoutSortColumn::Name => name_cmp(a, b),
-                ScoutSortColumn::Rank => {
-                    let rank_a = ScoutRank::parse(a.current_rank.as_deref());
-                    let rank_b = ScoutRank::parse(b.current_rank.as_deref());
-                    // Reversed so ascending shows highest rank first
-                    rank_b.cmp(&rank_a).then_with(|| name_cmp(a, b))
-                }
-                ScoutSortColumn::Grade => a.grade.cmp(&b.grade).then_with(|| name_cmp(a, b)),
-                ScoutSortColumn::Age => a.age().cmp(&b.age()).then_with(|| name_cmp(a, b)),
-                ScoutSortColumn::Patrol => {
-                    cmp_ignore_case(
-                        a.patrol_name.as_deref().unwrap_or(""),
-                        b.patrol_name.as_deref().unwrap_or(""),
-                    )
-                    .then_with(|| name_cmp(a, b))
-                }
-            };
-
-            if self.scout_sort_ascending {
-                cmp
-            } else {
-                cmp.reverse()
-            }
+            let cmp = Youth::cmp_by_column(a, b, self.scout_sort_column);
+            if self.scout_sort_ascending { cmp } else { cmp.reverse() }
         });
 
         sorted
@@ -2365,14 +2014,7 @@ impl App {
             sorted.retain(|y| Self::youth_matches_search(y, &query));
         }
 
-        sorted.sort_by(|a, b| {
-            let rank_a = ScoutRank::parse(a.current_rank.as_deref());
-            let rank_b = ScoutRank::parse(b.current_rank.as_deref());
-
-            rank_b.cmp(&rank_a)
-                .then_with(|| cmp_ignore_case(&a.last_name, &b.last_name))
-                .then_with(|| cmp_ignore_case(&a.first_name, &b.first_name))
-        });
+        sorted.sort_by(|a, b| Youth::cmp_by_column(a, b, ScoutSortColumn::Rank));
 
         sorted
     }
@@ -2384,44 +2026,12 @@ impl App {
         // Apply search filter (searches name, location, type)
         if !self.search_query.is_empty() {
             let query = self.search_query.to_lowercase();
-            sorted.retain(|e| {
-                contains_ignore_case(&e.name, &query)
-                    || e.location
-                        .as_ref()
-                        .map(|s| contains_ignore_case(s, &query))
-                        .unwrap_or(false)
-                    || contains_ignore_case(e.derived_type(), &query)
-            });
+            sorted.retain(|e| e.matches_search(&query));
         }
 
         sorted.sort_by(|a, b| {
-            let name_cmp = |x: &Event, y: &Event| cmp_ignore_case(&x.name, &y.name);
-
-            let cmp = match self.event_sort_column {
-                EventSortColumn::Name => name_cmp(a, b),
-                EventSortColumn::Date => {
-                    let date_a = a.start_date.as_deref().unwrap_or("");
-                    let date_b = b.start_date.as_deref().unwrap_or("");
-                    date_a.cmp(date_b).then_with(|| name_cmp(a, b))
-                }
-                EventSortColumn::Location => {
-                    cmp_ignore_case(
-                        a.location.as_deref().unwrap_or(""),
-                        b.location.as_deref().unwrap_or(""),
-                    )
-                    .then_with(|| name_cmp(a, b))
-                }
-                EventSortColumn::Type => {
-                    cmp_ignore_case(a.derived_type(), b.derived_type())
-                        .then_with(|| name_cmp(a, b))
-                }
-            };
-
-            if self.event_sort_ascending {
-                cmp
-            } else {
-                cmp.reverse()
-            }
+            let cmp = Event::cmp_by_column(a, b, self.event_sort_column);
+            if self.event_sort_ascending { cmp } else { cmp.reverse() }
         });
 
         sorted
@@ -2434,53 +2044,6 @@ impl App {
             .unit_name
             .clone()
             .unwrap_or_else(|| "Trailcache".to_string())
-    }
-
-    /// Deduplicate adults by person_guid, combining multiple positions.
-    ///
-    /// The Scouting API returns duplicate entries for adults who hold multiple
-    /// positions (e.g., both "Assistant Scoutmaster" and "Committee Member").
-    /// This function merges those duplicates into single entries with combined
-    /// position strings (e.g., "Assistant Scoutmaster, Committee Member").
-    ///
-    /// Adults without a person_guid are kept as separate entries to avoid
-    /// incorrectly merging unrelated records.
-    fn deduplicate_adults(adults: Vec<Adult>) -> Vec<Adult> {
-        let mut by_guid: HashMap<String, Adult> = HashMap::new();
-        let mut no_guid_counter: usize = 0;
-
-        for adult in adults {
-            let guid = adult.person_guid.clone().unwrap_or_default();
-            if guid.is_empty() {
-                // Use a separate counter for deterministic synthetic keys
-                by_guid.insert(format!("_no_guid_{}", no_guid_counter), adult);
-                no_guid_counter += 1;
-                continue;
-            }
-
-            if let Some(existing) = by_guid.get_mut(&guid) {
-                if let Some(new_pos) = &adult.position {
-                    if let Some(existing_pos) = &existing.position {
-                        // Split existing positions and check for exact match
-                        let existing_positions: Vec<&str> = existing_pos
-                            .split(", ")
-                            .map(|s| s.trim())
-                            .collect();
-                        if !existing_positions.contains(&new_pos.as_str()) {
-                            existing.position = Some(format!("{}, {}", existing_pos, new_pos));
-                        }
-                    } else {
-                        existing.position = Some(new_pos.clone());
-                    }
-                }
-            } else {
-                by_guid.insert(guid, adult);
-            }
-        }
-
-        let mut result: Vec<Adult> = by_guid.into_values().collect();
-        result.sort_by(|a, b| a.last_name.cmp(&b.last_name).then(a.first_name.cmp(&b.first_name)));
-        result
     }
 
     // =========================================================================

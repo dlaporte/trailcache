@@ -37,6 +37,7 @@ pub fn run() {
             commands::login,
             commands::get_saved_username,
             commands::logout,
+            commands::quit_app,
             // Data
             commands::get_youth,
             commands::get_adults,
@@ -65,6 +66,7 @@ pub fn run() {
             // Offline mode
             commands::get_offline_mode,
             commands::set_offline_mode,
+            commands::cache_for_offline,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

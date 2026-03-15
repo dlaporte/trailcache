@@ -12,16 +12,11 @@ use ratatui::{
     Frame,
 };
 
-use crate::app::{App, Focus, ScoutRank};
-use trailcache_core::models::{format_date, RankProgress, Youth};
+use crate::app::{App, Focus};
+use trailcache_core::models::{format_date, RankProgress, RankRequirement, StatusCategory, Youth};
 use trailcache_core::models::pivot::{group_youth_by_rank, RankGroup, RankGroupEntry};
 use crate::ui::styles;
 use trailcache_core::utils::{strip_html, wrap_text};
-
-/// Get the sort order for a rank name using ScoutRank enum.
-fn rank_order(rank_name: &str) -> usize {
-    ScoutRank::parse(Some(rank_name)).order()
-}
 
 /// Group youth by their current (highest completed) rank.
 /// Delegates to shared core pivot logic.
@@ -39,29 +34,17 @@ pub fn get_rank_list(
     sort_by_count: bool,
     sort_ascending: bool,
 ) -> Vec<(String, usize)> {
-    let grouped = get_ranks_with_scouts(youth, all_ranks);
-    let mut result: Vec<(String, usize)> = grouped
-        .into_iter()
-        .map(|g| (g.rank_name, g.scouts.len()))
-        .collect();
-
-    if sort_by_count {
-        // Sort by count
-        if sort_ascending {
-            result.sort_by(|a, b| a.1.cmp(&b.1).then_with(|| rank_order(&a.0).cmp(&rank_order(&b.0))));
-        } else {
-            result.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| rank_order(&a.0).cmp(&rank_order(&b.0))));
-        }
-    } else {
-        // Sort by name (rank order)
-        if sort_ascending {
-            result.sort_by(|a, b| rank_order(&a.0).cmp(&rank_order(&b.0)));
-        } else {
-            result.sort_by(|a, b| rank_order(&b.0).cmp(&rank_order(&a.0)));
-        }
+    use trailcache_core::models::pivot::rank_list;
+    let mut entries = rank_list(youth, all_ranks, sort_by_count);
+    // Core sorts count desc / rank-order asc by default.
+    // For count: default is desc, so reverse if ascending.
+    // For rank order: default is asc, so reverse if not ascending.
+    if sort_by_count && sort_ascending {
+        entries.reverse();
+    } else if !sort_by_count && !sort_ascending {
+        entries.reverse();
     }
-
-    result
+    entries.into_iter().map(|e| (e.name, e.count)).collect()
 }
 
 pub fn render(frame: &mut Frame, app: &mut App, area: Rect) {
@@ -182,25 +165,12 @@ fn render_scout_list(frame: &mut Frame, app: &mut App, area: Rect) {
             };
 
             let progress = match &entry.rank {
-                Some(rank) if rank.is_awarded() => {
-                    let date_str = rank.date_awarded.as_deref()
-                        .or(rank.date_completed.as_deref());
-                    let date = format_date(date_str);
-                    let display = if date == "?" { "Awarded".to_string() } else { date };
-                    (display, styles::success_style())
-                }
-                Some(rank) if rank.is_completed() => {
-                    let date = format_date(rank.date_completed.as_deref());
-                    let display = if date == "?" { "Done".to_string() } else { date };
-                    (display, styles::highlight_style())
-                }
-                Some(rank) => {
-                    if let Some(pct) = rank.progress_percent() {
-                        (format!("{}%", pct), styles::muted_style())
-                    } else {
-                        ("-".to_string(), styles::muted_style())
-                    }
-                }
+                Some(rank) => match rank.status_display() {
+                    (StatusCategory::Awarded, text) => (text, styles::success_style()),
+                    (StatusCategory::Completed, text) => (text, styles::highlight_style()),
+                    (StatusCategory::InProgress, text) => (text, styles::muted_style()),
+                    (StatusCategory::None, _) => ("-".to_string(), styles::muted_style()),
+                },
                 None => ("".to_string(), styles::muted_style()), // Crossover - no rank data
             };
 
@@ -266,8 +236,7 @@ fn render_requirements_view(frame: &mut Frame, app: &mut App, area: Rect, focuse
         lines.push(Line::from(Span::styled("Loading requirements...", styles::muted_style())));
     } else {
         // Count completed
-        let completed = app.selected_rank_requirements.iter().filter(|r| r.is_completed()).count();
-        let total = app.selected_rank_requirements.len();
+        let (completed, total) = RankRequirement::completion_count(&app.selected_rank_requirements);
         lines.push(Line::from(vec![
             Span::styled("Progress: ", styles::muted_style()),
             Span::styled(format!("{}/{}", completed, total), styles::highlight_style()),

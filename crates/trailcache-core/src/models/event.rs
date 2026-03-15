@@ -1,3 +1,5 @@
+use std::cmp::Ordering;
+
 use chrono::DateTime;
 use serde::{Deserialize, Serialize};
 
@@ -237,29 +239,29 @@ impl Event {
 
     pub fn going_count(&self) -> i32 {
         self.invited_users.iter()
-            .filter(|u| u.rsvp.as_deref() == Some("going"))
+            .filter(|u| matches!(u.status(), RsvpStatus::Going))
             .count() as i32
     }
 
     pub fn not_going_count(&self) -> i32 {
         self.invited_users.iter()
-            .filter(|u| u.rsvp.as_deref() == Some("not going"))
+            .filter(|u| matches!(u.status(), RsvpStatus::NotGoing))
             .count() as i32
     }
 
     pub fn no_response_count(&self) -> i32 {
         self.invited_users.iter()
-            .filter(|u| u.rsvp.is_none() || u.rsvp.as_deref() == Some(""))
+            .filter(|u| matches!(u.status(), RsvpStatus::NoResponse))
             .count() as i32
     }
 
     /// Adult RSVP counts: (going, not_going)
     pub fn adult_rsvp_counts(&self) -> (i32, i32) {
         let going = self.invited_users.iter()
-            .filter(|u| u.is_adult && u.rsvp.as_deref() == Some("going"))
+            .filter(|u| u.is_adult && matches!(u.status(), RsvpStatus::Going))
             .count() as i32;
         let not_going = self.invited_users.iter()
-            .filter(|u| u.is_adult && u.rsvp.as_deref() == Some("not going"))
+            .filter(|u| u.is_adult && matches!(u.status(), RsvpStatus::NotGoing))
             .count() as i32;
         (going, not_going)
     }
@@ -267,12 +269,31 @@ impl Event {
     /// Scout RSVP counts: (going, not_going)
     pub fn scout_rsvp_counts(&self) -> (i32, i32) {
         let going = self.invited_users.iter()
-            .filter(|u| !u.is_adult && u.rsvp.as_deref() == Some("going"))
+            .filter(|u| !u.is_adult && matches!(u.status(), RsvpStatus::Going))
             .count() as i32;
         let not_going = self.invited_users.iter()
-            .filter(|u| !u.is_adult && u.rsvp.as_deref() == Some("not going"))
+            .filter(|u| !u.is_adult && matches!(u.status(), RsvpStatus::NotGoing))
             .count() as i32;
         (going, not_going)
+    }
+
+    /// Check if this event matches a search query (case-insensitive).
+    /// Query should already be lowercased.
+    pub fn matches_search(&self, query_lowercase: &str) -> bool {
+        self.name.to_lowercase().contains(query_lowercase)
+            || self.location.as_ref().map(|s| s.to_lowercase().contains(query_lowercase)).unwrap_or(false)
+            || self.derived_type().to_lowercase().contains(query_lowercase)
+    }
+
+    /// Invited users who have responded (Going or Not Going), split by adult/youth.
+    pub fn respondents(&self) -> (Vec<&InvitedUser>, Vec<&InvitedUser>) {
+        let (mut adults, mut scouts) = (vec![], vec![]);
+        for u in &self.invited_users {
+            if matches!(u.status(), RsvpStatus::Going | RsvpStatus::NotGoing) {
+                if u.is_adult { adults.push(u); } else { scouts.push(u); }
+            }
+        }
+        (adults, scouts)
     }
 
     pub fn rsvp_summary(&self) -> String {
@@ -280,6 +301,33 @@ impl Event {
             self.going_count(),
             self.not_going_count(),
             self.no_response_count())
+    }
+
+    /// Compare two events by the given column, with name as tiebreaker.
+    pub fn cmp_by_column(a: &Event, b: &Event, column: EventSortColumn) -> Ordering {
+        use crate::utils::cmp_ignore_case;
+
+        let name_cmp = || cmp_ignore_case(&a.name, &b.name);
+
+        match column {
+            EventSortColumn::Name => name_cmp(),
+            EventSortColumn::Date => {
+                let date_a = a.start_date.as_deref().unwrap_or("");
+                let date_b = b.start_date.as_deref().unwrap_or("");
+                date_a.cmp(date_b).then_with(name_cmp)
+            }
+            EventSortColumn::Location => {
+                cmp_ignore_case(
+                    a.location.as_deref().unwrap_or(""),
+                    b.location.as_deref().unwrap_or(""),
+                )
+                .then_with(name_cmp)
+            }
+            EventSortColumn::Type => {
+                cmp_ignore_case(a.derived_type(), b.derived_type())
+                    .then_with(name_cmp)
+            }
+        }
     }
 }
 
@@ -329,4 +377,30 @@ pub enum EventSortColumn {
     Date,
     Location,
     Type,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_event_matches_search() {
+        let event = Event {
+            id: 1,
+            name: "Summer Camp".to_string(),
+            description: None,
+            start_date: None,
+            end_date: None,
+            location: Some("Camp Parsons".to_string()),
+            event_type: Some("Camping".to_string()),
+            rsvp: false,
+            slips_required: false,
+            invited_users: vec![],
+            units: vec![],
+        };
+        assert!(event.matches_search("summer"));
+        assert!(event.matches_search("parsons"));
+        assert!(event.matches_search("camping"));
+        assert!(!event.matches_search("hiking"));
+    }
 }

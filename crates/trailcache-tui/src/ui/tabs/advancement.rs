@@ -9,31 +9,14 @@ use ratatui::{
 };
 
 use crate::app::{AdvancementView, App, Focus};
-use trailcache_core::models::MeritBadgeProgress;
+use trailcache_core::models::{EAGLE_REQUIRED_COUNT, MeritBadgeProgress, StatusCategory};
 use trailcache_core::utils::{strip_html, truncate, wrap_text};
 use crate::ui::styles;
 
 /// Get badges sorted: in-progress first (by percent desc), then completed (by date desc)
 pub fn get_sorted_badges(badges: &[MeritBadgeProgress]) -> Vec<&MeritBadgeProgress> {
     let mut sorted: Vec<&MeritBadgeProgress> = badges.iter().collect();
-    sorted.sort_by(|a, b| {
-        let a_done = a.is_completed();
-        let b_done = b.is_completed();
-        if a_done != b_done {
-            return a_done.cmp(&b_done); // false (in-progress) comes first
-        }
-        if !a_done {
-            // Both in-progress: sort by percent desc
-            let pct_a = a.percent_completed.unwrap_or(0.0);
-            let pct_b = b.percent_completed.unwrap_or(0.0);
-            pct_b.partial_cmp(&pct_a).unwrap_or(std::cmp::Ordering::Equal)
-        } else {
-            // Both completed: sort by date desc
-            let date_a = a.date_completed.as_deref().unwrap_or("");
-            let date_b = b.date_completed.as_deref().unwrap_or("");
-            date_b.cmp(date_a)
-        }
-    });
+    sorted.sort_by(|a, b| MeritBadgeProgress::cmp_by_progress(a, b));
     sorted
 }
 
@@ -187,18 +170,11 @@ fn render_ranks_view(frame: &mut Frame, app: &mut App, area: Rect, focused: bool
                     let is_selected = original_idx == app.advancement_rank_selection && focused;
                     let prefix = if is_selected { "> " } else { "  " };
 
-                    let (status_text, status_style) = if rank.is_awarded() {
-                        ("Awarded".to_string(), styles::success_style())
-                    } else if rank.is_completed() {
-                        ("Complete".to_string(), styles::highlight_style())
-                    } else if let Some(pct) = rank.progress_percent() {
-                        if pct > 0 {
-                            (format!("{}%", pct), styles::highlight_style())
-                        } else {
-                            (placeholder.to_string(), styles::muted_style())
-                        }
-                    } else {
-                        (placeholder.to_string(), styles::muted_style())
+                    let (status_text, status_style) = match rank.status_display() {
+                        (StatusCategory::Awarded, text) => (text, styles::success_style()),
+                        (StatusCategory::Completed, text) => (text, styles::highlight_style()),
+                        (StatusCategory::InProgress, text) => (text, styles::highlight_style()),
+                        (StatusCategory::None, _) => (placeholder.to_string(), styles::muted_style()),
                     };
 
                     let rank_style = if is_selected {
@@ -219,14 +195,14 @@ fn render_ranks_view(frame: &mut Frame, app: &mut App, area: Rect, focused: bool
                             lines.push(Line::from(vec![
                                 Span::raw("    "),
                                 Span::styled("Completed:  ", styles::muted_style()),
-                                Span::raw(date.chars().take(10).collect::<String>()),
+                                Span::raw(trailcache_core::models::format_date(Some(date))),
                             ]));
                         }
                         if let Some(ref date) = rank.date_awarded {
                             lines.push(Line::from(vec![
                                 Span::raw("    "),
                                 Span::styled("Awarded:    ", styles::muted_style()),
-                                Span::raw(date.chars().take(10).collect::<String>()),
+                                Span::raw(trailcache_core::models::format_date(Some(date))),
                             ]));
                         }
                     }
@@ -280,8 +256,7 @@ fn render_requirements_view(frame: &mut Frame, app: &mut App, area: Rect, focuse
         lines.push(Line::from(Span::styled("Loading requirements...", styles::muted_style())));
     } else {
         // Count completed
-        let completed = app.selected_rank_requirements.iter().filter(|r| r.is_completed()).count();
-        let total = app.selected_rank_requirements.len();
+        let (completed, total) = trailcache_core::models::RankRequirement::completion_count(&app.selected_rank_requirements);
         lines.push(Line::from(vec![
             Span::styled("Progress: ", styles::muted_style()),
             Span::styled(format!("{}/{}", completed, total), styles::highlight_style()),
@@ -325,7 +300,7 @@ fn render_requirements_view(frame: &mut Frame, app: &mut App, area: Rect, focuse
                         lines.push(Line::from(vec![
                             Span::raw("          "),
                             Span::styled("Completed: ", styles::muted_style()),
-                            Span::styled(date.chars().take(10).collect::<String>(), styles::highlight_style()),
+                            Span::styled(trailcache_core::models::format_date(Some(date)), styles::highlight_style()),
                         ]));
                     }
                 }
@@ -365,19 +340,15 @@ fn render_badges_view(frame: &mut Frame, app: &mut App, area: Rect, focused: boo
             )));
 
             // Count stats
-            let in_progress_count = app.selected_youth_badges.iter().filter(|mb| !mb.is_completed()).count();
-            let completed_count = app.selected_youth_badges.iter().filter(|mb| mb.is_completed()).count();
-            let eagle_count = app.selected_youth_badges.iter()
-                .filter(|mb| mb.is_completed() && mb.is_eagle_required.unwrap_or(false))
-                .count();
+            let summary = MeritBadgeProgress::summarize(&app.selected_youth_badges);
 
             lines.push(Line::from(vec![
                 Span::styled("Completed: ", styles::muted_style()),
-                Span::styled(format!("{}", completed_count), styles::highlight_style()),
+                Span::styled(format!("{}", summary.completed), styles::highlight_style()),
                 Span::styled(" | In Progress: ", styles::muted_style()),
-                Span::styled(format!("{}", in_progress_count), styles::highlight_style()),
+                Span::styled(format!("{}", summary.in_progress), styles::highlight_style()),
                 Span::styled(" | Eagle: ", styles::muted_style()),
-                Span::styled(format!("{}/13", eagle_count), styles::highlight_style()),
+                Span::styled(format!("{}/{}", summary.eagle_completed, EAGLE_REQUIRED_COUNT), styles::highlight_style()),
             ]));
             lines.push(Line::from(""));
 
@@ -399,15 +370,10 @@ fn render_badges_view(frame: &mut Frame, app: &mut App, area: Rect, focused: boo
 
                     let eagle_marker = if badge.is_eagle_required.unwrap_or(false) { "*" } else { " " };
 
-                    let (status_text, status_style) = if badge.is_completed() {
-                        let date = badge.date_completed.as_ref()
-                            .map(|d| d.chars().take(10).collect::<String>())
-                            .unwrap_or_else(|| "Done".to_string());
-                        (date, styles::success_style())
-                    } else if let Some(pct) = badge.progress_percent() {
-                        (format!("{:>3}%", pct), styles::highlight_style())
-                    } else {
-                        ("  -".to_string(), styles::muted_style())
+                    let (status_text, status_style) = match badge.status_display() {
+                        (StatusCategory::Awarded, text) | (StatusCategory::Completed, text) => (text, styles::success_style()),
+                        (StatusCategory::InProgress, text) => (format!("{:>4}", text), styles::highlight_style()),
+                        (StatusCategory::None, text) => (if text.is_empty() { "  -".to_string() } else { text }, styles::muted_style()),
                     };
 
                     let name_style = if is_selected { styles::selected_style() } else { styles::list_item_style() };
@@ -465,8 +431,7 @@ fn render_badge_requirements_view(frame: &mut Frame, app: &mut App, area: Rect, 
         lines.push(Line::from(Span::styled("Loading requirements...", styles::muted_style())));
     } else {
         // Count completed
-        let completed = app.selected_badge_requirements.iter().filter(|r| r.is_completed()).count();
-        let total = app.selected_badge_requirements.len();
+        let (completed, total) = trailcache_core::models::MeritBadgeRequirement::completion_count(&app.selected_badge_requirements);
         lines.push(Line::from(vec![
             Span::styled("Progress: ", styles::muted_style()),
             Span::styled(format!("{}/{}", completed, total), styles::highlight_style()),
@@ -514,7 +479,7 @@ fn render_badge_requirements_view(frame: &mut Frame, app: &mut App, area: Rect, 
                         lines.push(Line::from(vec![
                             Span::raw("          "),
                             Span::styled("Completed: ", styles::muted_style()),
-                            Span::styled(date.chars().take(10).collect::<String>(), styles::highlight_style()),
+                            Span::styled(trailcache_core::models::format_date(Some(date)), styles::highlight_style()),
                         ]));
                     }
                 }

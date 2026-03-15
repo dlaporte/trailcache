@@ -1,4 +1,3 @@
-use chrono::{NaiveDate, Utc};
 use ratatui::{
     layout::{Constraint, Direction, Layout, Rect},
     text::{Line, Span},
@@ -7,10 +6,10 @@ use ratatui::{
 };
 
 use crate::app::{App, Focus, ScoutDetailView};
-use trailcache_core::models::{format_date, ScoutSortColumn};
+use trailcache_core::models::{format_date, EAGLE_REQUIRED_COUNT, MeritBadgeProgress, ScoutSortColumn, StatusCategory};
 use crate::ui::styles;
 use crate::ui::tabs::advancement::get_sorted_badges;
-use trailcache_core::utils::{strip_html, truncate, wrap_text};
+use trailcache_core::utils::{check_expiration, strip_html, truncate, wrap_text, ExpirationStatus};
 
 /// Render the Scouts tab - table with sortable columns
 pub fn render_scouts(frame: &mut Frame, app: &mut App, area: Rect) {
@@ -156,15 +155,12 @@ fn render_details_view(frame: &mut Frame, app: &mut App, area: Rect, focused: bo
 
             // Membership status from registrarInfo
             if let Some(ref reg_info) = youth.registrar_info {
-                if let Some(ref exp_date) = reg_info.registration_expire_dt {
-                    if let Ok(date) = chrono::NaiveDate::parse_from_str(&exp_date[..10], "%Y-%m-%d") {
-                        let today = chrono::Utc::now().date_naive();
-                        let formatted_date = date.format("%b %d, %Y").to_string();
-
-                        let (status_text, status_style) = if date < today {
-                            (format!("Expired {}", formatted_date), styles::error_style())
-                        } else {
-                            (format!("Expires {}", formatted_date), styles::success_style())
+                if let Some(ref exp_str) = reg_info.registration_expire_dt {
+                    if let Some((status, formatted)) = check_expiration(exp_str) {
+                        let (status_text, status_style) = match status {
+                            ExpirationStatus::Expired => (format!("Expired {}", formatted), styles::error_style()),
+                            ExpirationStatus::ExpiringSoon => (format!("Expires {}", formatted), styles::error_style()),
+                            ExpirationStatus::Active => (format!("Expires {}", formatted), styles::success_style()),
                         };
 
                         lines.push(Line::from(vec![
@@ -357,24 +353,11 @@ fn render_ranks_view(frame: &mut Frame, app: &mut App, area: Rect, focused: bool
                     let original_idx = app.selected_youth_ranks.len().saturating_sub(1).saturating_sub(i);
                     let is_selected = original_idx == app.advancement_rank_selection && focused;
 
-                    let (status_text, status_style) = if rank.is_awarded() {
-                        // Show awarded date in green
-                        let date = format_date(rank.date_awarded.as_deref());
-                        let display = if date == "?" { "Awarded".to_string() } else { date };
-                        (display, styles::success_style())
-                    } else if rank.is_completed() {
-                        // Show completed date in yellow
-                        let date = format_date(rank.date_completed.as_deref());
-                        let display = if date == "?" { "Complete".to_string() } else { date };
-                        (display, styles::highlight_style())
-                    } else if let Some(pct) = rank.progress_percent() {
-                        if pct > 0 {
-                            (format!("{}%", pct), styles::highlight_style())
-                        } else {
-                            (placeholder.to_string(), styles::muted_style())
-                        }
-                    } else {
-                        (placeholder.to_string(), styles::muted_style())
+                    let (status_text, status_style) = match rank.status_display() {
+                        (StatusCategory::Awarded, text) => (text, styles::success_style()),
+                        (StatusCategory::Completed, text) => (text, styles::highlight_style()),
+                        (StatusCategory::InProgress, text) => (text, styles::highlight_style()),
+                        (StatusCategory::None, _) => (placeholder.to_string(), styles::muted_style()),
                     };
 
                     let rank_style = if is_selected {
@@ -475,7 +458,7 @@ fn render_rank_requirements_view(frame: &mut Frame, app: &mut App, area: Rect, f
                         lines.push(Line::from(vec![
                             Span::raw("          "),
                             Span::styled("Completed: ", styles::muted_style()),
-                            Span::styled(format!("{:<width$}", date.chars().take(10).collect::<String>(), width = text_width.saturating_sub(10)), styles::highlight_style()),
+                            Span::styled(format!("{:<width$}", format_date(Some(date)), width = text_width.saturating_sub(10)), styles::highlight_style()),
                         ]));
                     }
                 }
@@ -511,19 +494,15 @@ fn render_badges_view(frame: &mut Frame, app: &mut App, area: Rect, focused: boo
             )));
 
             // Count stats
-            let in_progress_count = app.selected_youth_badges.iter().filter(|mb| !mb.is_completed()).count();
-            let completed_count = app.selected_youth_badges.iter().filter(|mb| mb.is_completed()).count();
-            let eagle_count = app.selected_youth_badges.iter()
-                .filter(|mb| mb.is_completed() && mb.is_eagle_required.unwrap_or(false))
-                .count();
+            let summary = MeritBadgeProgress::summarize(&app.selected_youth_badges);
 
             lines.push(Line::from(vec![
                 Span::styled("Completed: ", styles::muted_style()),
-                Span::styled(format!("{}", completed_count), styles::highlight_style()),
+                Span::styled(format!("{}", summary.completed), styles::highlight_style()),
                 Span::styled(" | In Progress: ", styles::muted_style()),
-                Span::styled(format!("{}", in_progress_count), styles::highlight_style()),
+                Span::styled(format!("{}", summary.in_progress), styles::highlight_style()),
                 Span::styled(" | Eagle: ", styles::muted_style()),
-                Span::styled(format!("{}/13", eagle_count), styles::highlight_style()),
+                Span::styled(format!("{}/{}", summary.eagle_completed, EAGLE_REQUIRED_COUNT), styles::highlight_style()),
             ]));
             lines.push(Line::from(""));
 
@@ -544,14 +523,10 @@ fn render_badges_view(frame: &mut Frame, app: &mut App, area: Rect, focused: boo
 
                     let eagle_marker = if badge.is_eagle_required.unwrap_or(false) { "*" } else { " " };
 
-                    let (status_text, status_style) = if badge.is_completed() {
-                        let date = format_date(badge.date_completed.as_deref());
-                        let display = if date == "?" { "Done".to_string() } else { date };
-                        (display, styles::success_style())
-                    } else if let Some(pct) = badge.progress_percent() {
-                        (format!("{}%", pct), styles::highlight_style())
-                    } else {
-                        ("-".to_string(), styles::muted_style())
+                    let (status_text, status_style) = match badge.status_display() {
+                        (StatusCategory::Awarded, text) | (StatusCategory::Completed, text) => (text, styles::success_style()),
+                        (StatusCategory::InProgress, text) => (text, styles::highlight_style()),
+                        (StatusCategory::None, _) => ("-".to_string(), styles::muted_style()),
                     };
 
                     let name_style = if is_selected { styles::selected_style() } else { styles::list_item_style() };
@@ -830,15 +805,12 @@ fn render_adult_detail(frame: &mut Frame, app: &mut App, area: Rect) {
 
             // Membership status from registrarInfo
             if let Some(ref reg_info) = adult.registrar_info {
-                if let Some(ref exp_date) = reg_info.registration_expire_dt {
-                    if let Ok(date) = chrono::NaiveDate::parse_from_str(&exp_date[..10], "%Y-%m-%d") {
-                        let today = chrono::Utc::now().date_naive();
-                        let formatted_date = date.format("%b %d, %Y").to_string();
-
-                        let (status_text, status_style) = if date < today {
-                            (format!("Expired {}", formatted_date), styles::error_style())
-                        } else {
-                            (format!("Expires {}", formatted_date), styles::success_style())
+                if let Some(ref exp_str) = reg_info.registration_expire_dt {
+                    if let Some((status, formatted)) = check_expiration(exp_str) {
+                        let (status_text, status_style) = match status {
+                            ExpirationStatus::Expired => (format!("Expired {}", formatted), styles::error_style()),
+                            ExpirationStatus::ExpiringSoon => (format!("Expires {}", formatted), styles::error_style()),
+                            ExpirationStatus::Active => (format!("Expires {}", formatted), styles::success_style()),
                         };
 
                         lines.push(Line::from(vec![
@@ -854,33 +826,23 @@ fn render_adult_detail(frame: &mut Frame, app: &mut App, area: Rect) {
             // Training section
             lines.push(Line::from(Span::styled("Training", styles::highlight_style())));
 
-            let (ypt_text, ypt_style) = if let Some(ref exp_str) = adult.ypt_expired_date {
-                if let Ok(exp_date) = NaiveDate::parse_from_str(exp_str, "%Y-%m-%d") {
-                    let today = Utc::now().date_naive();
-                    let formatted_date = exp_date.format("%b %d, %Y").to_string();
-
-                    if exp_date < today {
-                        (format!("Expired {}", formatted_date), styles::error_style())
-                    } else if (exp_date - today).num_days() < 90 {
-                        (format!("Expires {}", formatted_date), styles::error_style())
-                    } else {
-                        (format!("Expires {}", formatted_date), styles::success_style())
-                    }
-                } else {
-                    ("-".to_string(), styles::muted_style())
-                }
-            } else {
-                ("-".to_string(), styles::muted_style())
-            };
+            let (ypt_text, ypt_style) = adult.ypt_expired_date.as_ref()
+                .and_then(|exp| check_expiration(exp))
+                .map(|(status, formatted)| match status {
+                    ExpirationStatus::Expired => (format!("Expired {}", formatted), styles::error_style()),
+                    ExpirationStatus::ExpiringSoon => (format!("Expires {}", formatted), styles::error_style()),
+                    ExpirationStatus::Active => (format!("Expires {}", formatted), styles::success_style()),
+                })
+                .unwrap_or_else(|| ("-".to_string(), styles::muted_style()));
             lines.push(Line::from(vec![
                 Span::styled("YPT:      ", styles::muted_style()),
                 Span::styled(ypt_text, ypt_style),
             ]));
 
-            let (trained_text, trained_style) = match adult.position_trained.as_deref() {
-                Some("Trained") => ("Trained", styles::success_style()),
-                Some("Not Trained") => ("Not Trained", styles::error_style()),
-                _ => ("-", styles::muted_style()),
+            let (trained_text, trained_style) = match adult.is_position_trained() {
+                Some(true) => ("Trained", styles::success_style()),
+                Some(false) => (trailcache_core::models::DISPLAY_NOT_TRAINED, styles::error_style()),
+                None => ("-", styles::muted_style()),
             };
             lines.push(Line::from(vec![
                 Span::styled("Position: ", styles::muted_style()),

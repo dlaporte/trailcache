@@ -25,6 +25,8 @@
 		refreshData,
 		getOfflineMode,
 		setOfflineMode,
+		cacheForOffline,
+		quitApp,
 		onRefreshProgress,
 		type YouthDisplay,
 		type AdultDisplay,
@@ -45,6 +47,7 @@
 		type BadgePivotScout,
 		type MeritBadgeRequirementDisplay,
 		type BadgeRequirementsResponseDisplay,
+		type BadgeSummary,
 		type RankPivotEntry,
 		type BadgePivotEntry,
 		type CacheAges,
@@ -101,6 +104,7 @@
 	let selectedYouth: YouthDisplay | null = $state(null);
 	let youthRanks: RankProgressDisplay[] = $state([]);
 	let youthBadges: MeritBadgeDisplay[] = $state([]);
+	let badgeSummary: BadgeSummary = $state({ completed: 0, in_progress: 0, eagle_completed: 0, eagle_required_total: 13 });
 	let youthLeadership: LeadershipDisplay[] = $state([]);
 	let youthAwards: AwardDisplay[] = $state([]);
 	let loadingDetail = $state(false);
@@ -293,9 +297,18 @@
 		selectedYouth = null;
 		selectedAdult = null;
 		selectedEvent = null;
+		parents = [];
+		cacheAges = null;
 		pivotDataLoaded = false;
 		rankPivotData = [];
 		badgePivotData = [];
+		scoutDetailTab = 'details';
+		detailView = 'overview';
+		activeTab = 'scouts';
+		searchQuery = '';
+		error = '';
+		statusMessage = '';
+		statusErrors = [];
 	}
 
 	// ========================================================================
@@ -370,9 +383,21 @@
 			} else {
 				// Going offline - cache everything first, then set offline
 				statusMessage = 'Caching data for offline mode...';
-				await handleRefresh();
-				offlineMode = await setOfflineMode(true);
-				statusMessage = 'Offline mode - using cached data';
+				refreshProgress = null;
+				const unlisten = await onRefreshProgress((progress) => {
+					refreshProgress = progress;
+					statusMessage = `Caching (${progress.current}/${progress.total}): ${progress.step}`;
+				});
+				try {
+					const result = await cacheForOffline();
+					offlineMode = await setOfflineMode(true);
+					statusMessage = result.includes('gaps')
+						? result
+						: 'Offline mode - using cached data';
+				} finally {
+					refreshProgress = null;
+					unlisten();
+				}
 			}
 		} catch (e: any) {
 			statusMessage = 'Offline toggle failed: ' + (e?.message || String(e));
@@ -380,7 +405,7 @@
 	}
 
 	async function confirmAndQuit() {
-		await getCurrentWindow().destroy();
+		await quitApp();
 	}
 
 	async function loadPivotData() {
@@ -391,7 +416,9 @@
 				getAllYouthBadges().then((d) => (badgePivotData = d))
 			]);
 			pivotDataLoaded = true;
-		} catch {}
+		} catch (e) {
+			console.warn('Failed to load pivot data:', e);
+		}
 		loadingPivotData = false;
 	}
 
@@ -414,7 +441,7 @@
 			try {
 				await Promise.allSettled([
 					getYouthRanks(uid).then((d) => (youthRanks = d)),
-					getYouthMeritBadges(uid).then((d) => (youthBadges = d)),
+					getYouthMeritBadges(uid).then((d) => { youthBadges = d.badges; badgeSummary = d.summary; }),
 					getYouthLeadership(uid).then((d) => (youthLeadership = d)),
 					getYouthAwards(uid).then((d) => (youthAwards = d))
 				]);
@@ -477,7 +504,9 @@
 		eventGuests = [];
 		try {
 			eventGuests = await getEventGuests(e.id);
-		} catch {}
+		} catch (err) {
+			console.warn('Failed to load event guests:', err);
+		}
 		loadingEventDetail = false;
 	}
 
@@ -615,14 +644,6 @@
 			})
 	);
 
-	// Badge summary for scout detail
-	let badgeSummary = $derived.by(() => {
-		const completed = youthBadges.filter((b) => b.is_completed).length;
-		const inProgress = youthBadges.filter((b) => !b.is_completed).length;
-		const eagle = youthBadges.filter((b) => b.is_eagle_required && b.is_completed).length;
-		return { completed, inProgress, eagle };
-	});
-
 	// Pivot data (pre-aggregated from backend)
 	let filteredRankPivot = $derived(
 		rankPivotData
@@ -639,18 +660,10 @@
 	);
 
 
-	function pivotScoutOrder(a: { is_awarded: boolean; is_completed: boolean; sort_date: string }, b: { is_awarded: boolean; is_completed: boolean; sort_date: string }): number {
-		const statusOrder = (s: { is_awarded: boolean; is_completed: boolean }) =>
-			s.is_awarded ? 2 : s.is_completed ? 1 : 0;
-		const diff = statusOrder(a) - statusOrder(b);
-		if (diff !== 0) return diff;
-		return b.sort_date.localeCompare(a.sort_date);
-	}
-
 	let selectedRankScouts = $derived.by(() => {
 		if (!selectedPivotRank) return [];
 		const entry = rankPivotData.find((r) => r.rank_name === selectedPivotRank);
-		return [...(entry?.scouts ?? [])].sort(pivotScoutOrder);
+		return entry?.scouts ?? [];
 	});
 
 	let filteredBadgePivot = $derived(
@@ -670,16 +683,16 @@
 	let selectedBadgeScouts = $derived.by(() => {
 		if (!selectedPivotBadge) return [];
 		const entry = badgePivotData.find((b) => b.badge_name === selectedPivotBadge);
-		return [...(entry?.scouts ?? [])].sort(pivotScoutOrder);
+		return entry?.scouts ?? [];
 	});
 
 	// Event guests derived (status pre-computed by backend)
 	let adultGuests = $derived(eventGuests.filter((g) => !g.is_youth));
 	let youthGuests = $derived(eventGuests.filter((g) => g.is_youth));
-	let rsvpYesAdults = $derived(adultGuests.filter((g) => g.status === 'Going'));
-	let rsvpNoAdults = $derived(adultGuests.filter((g) => g.status === 'Not Going'));
-	let rsvpYesYouth = $derived(youthGuests.filter((g) => g.status === 'Going'));
-	let rsvpNoYouth = $derived(youthGuests.filter((g) => g.status === 'Not Going'));
+	let rsvpYesAdults = $derived(adultGuests.filter((g) => g.is_going));
+	let rsvpNoAdults = $derived(adultGuests.filter((g) => g.is_not_going));
+	let rsvpYesYouth = $derived(youthGuests.filter((g) => g.is_going));
+	let rsvpNoYouth = $derived(youthGuests.filter((g) => g.is_not_going));
 
 	// Parents for selected youth
 	let selectedYouthParents: ParentDisplay[] = $derived.by(() => {
@@ -689,24 +702,20 @@
 	});
 
 	// Unit tab computed data
-	let scoutRenewals = $derived(youth.filter((y) => y.membership_style === 'expired' || y.membership_style === 'expiring').sort((a, b) => (a.membership_sort_date || '').localeCompare(b.membership_sort_date || '')));
-	let adultRenewals = $derived(adults.filter((a) => a.membership_style === 'expired' || a.membership_style === 'expiring').sort((a, b) => (a.membership_sort_date || '').localeCompare(b.membership_sort_date || '')));
-	let yptIssues = $derived(adults.filter((a) => a.ypt_style === 'expired' || a.ypt_style === 'expiring').sort((a, b) => (a.ypt_sort_date || '').localeCompare(b.ypt_sort_date || '')));
-	let notTrained = $derived(adults.filter((a) => a.position_trained === 'Not Trained'));
+	let scoutRenewals = $derived(youth.filter((y) => y.has_membership_issue).sort((a, b) => (a.membership_sort_date || '').localeCompare(b.membership_sort_date || '')));
+	let adultRenewals = $derived(adults.filter((a) => a.has_membership_issue).sort((a, b) => (a.membership_sort_date || '').localeCompare(b.membership_sort_date || '')));
+	let yptIssues = $derived(adults.filter((a) => a.has_ypt_issue).sort((a, b) => (a.ypt_sort_date || '').localeCompare(b.ypt_sort_date || '')));
+	let notTrained = $derived(adults.filter((a) => a.needs_training));
 	let youthPositions = $derived(
 		youth
-			.filter((y) => y.position && y.position !== 'Scouts BSA' && y.position !== 'Scout')
+			.filter((y) => y.position_display != null)
 			.map((y) => ({
-				position: y.position!,
-				display: (y.position === 'Patrol Leader' || y.position === 'Assistant Patrol Leader') && y.patrol
-					? y.position + ' (' + y.patrol + ')'
-					: y.position!,
+				sort_key: y.position_sort_key,
+				display: y.position_display!,
 				name: y.display_name
 			}))
 			.sort((a, b) => {
-				const order = ['Senior Patrol Leader', 'Assistant Senior Patrol Leader', 'Troop Guide', 'Patrol Leader', 'Assistant Patrol Leader', 'Quartermaster', 'Scribe', 'Historian', 'Librarian', 'Chaplain Aide', 'Outdoor Ethics Guide', 'Den Chief', 'Instructor', 'Junior Assistant Scoutmaster', 'Bugler'];
-				const ai = order.indexOf(a.position); const bi = order.indexOf(b.position);
-				return (ai === -1 ? 999 : ai) - (bi === -1 ? 999 : bi) || a.display.localeCompare(b.display) || a.name.localeCompare(b.name);
+				return a.sort_key - b.sort_key || a.display.localeCompare(b.display) || a.name.localeCompare(b.name);
 			})
 	);
 
@@ -841,6 +850,7 @@
 						placeholder="my.scouting.org username"
 						disabled={loggingIn}
 						autocomplete="username"
+						autocapitalize="none"
 					/>
 				</label>
 
@@ -914,12 +924,6 @@
 				</nav>
 			</div>
 			<div class="top-bar-right">
-				<input
-					type="text"
-					class="search-input"
-					placeholder="Search..."
-					bind:value={searchQuery}
-				/>
 				<button
 					class="icon-button"
 					onclick={() => { if (!offlineMode) handleRefresh(); }}
@@ -1053,7 +1057,7 @@
 												{#if selectedYouth.membership_status}
 													<div class="info-item">
 														<span class="info-label">Membership</span>
-														<span class="info-value" class:membership-expired={selectedYouth.membership_style === 'expired'} class:membership-active={selectedYouth.membership_style === 'active'}>{selectedYouth.membership_status}</span>
+														<span class="info-value" class:membership-expired={selectedYouth.is_membership_expired} class:membership-active={selectedYouth.membership_style === 'active'}>{selectedYouth.membership_status}</span>
 													</div>
 												{/if}
 												{#if selectedYouth.member_id}
@@ -1155,7 +1159,7 @@
 															title="View requirements"
 														>
 															<td>{r.rank_name}</td>
-															<td>{r.is_awarded ? (r.formatted_date_awarded || r.formatted_date_completed) : r.formatted_date_completed}</td>
+															<td>{r.display_date}</td>
 															<td>
 											{#if r.is_awarded}
 												<span class="awarded-text">Awarded</span>
@@ -1191,8 +1195,8 @@
 											<h3>
 												Merit Badges ({youthBadges.length})
 												<span class="section-meta">
-													{badgeSummary.completed} complete, {badgeSummary.inProgress}
-													in progress, {badgeSummary.eagle}/13 Eagle
+													{badgeSummary.completed} complete, {badgeSummary.in_progress}
+													in progress, {badgeSummary.eagle_completed}/{badgeSummary.eagle_required_total} Eagle
 												</span>
 											</h3>
 											<table class="detail-table clickable-rows">
@@ -1200,7 +1204,7 @@
 													<tr><th>Badge</th><th>Status</th><th>Progress</th></tr>
 												</thead>
 												<tbody>
-													{#each [...youthBadges].sort((a, b) => { const statusOrder = (x: typeof a) => x.is_awarded ? 2 : x.is_completed ? 1 : 0; const diff = statusOrder(a) - statusOrder(b); if (diff !== 0) return diff; if (!a.is_completed && !a.is_awarded) return (b.percent_completed ?? 0) - (a.percent_completed ?? 0); return b.sort_date.localeCompare(a.sort_date); }) as b}
+													{#each youthBadges as b}
 														<tr
 															class="clickable-row"
 															onclick={() => viewBadgeRequirements(b)}
@@ -1260,7 +1264,7 @@
 													>
 												</thead>
 												<tbody>
-													{#each [...youthLeadership].sort((a, b) => b.sort_date.localeCompare(a.sort_date)) as l}
+													{#each youthLeadership as l}
 														<tr>
 															<td
 																>{l.name}{#if l.patrol}
@@ -1525,9 +1529,7 @@
 								</div>
 							{:else}
 								<!-- RSVP View -->
-								{#if offlineMode}
-									<p class="empty-message">RSVP data is not available in offline mode</p>
-								{:else if loadingEventDetail}
+								{#if loadingEventDetail}
 									<p class="loading-text">Loading RSVP data...</p>
 								{:else if eventGuests.length === 0}
 									<p class="empty-message">No RSVP data available</p>
@@ -1870,7 +1872,7 @@
 									{#if selectedAdult.membership_status}
 										<div class="info-item">
 											<span class="info-label">Membership</span>
-											<span class="info-value" class:membership-expired={selectedAdult.membership_style === 'expired'} class:membership-expiring={selectedAdult.membership_style === 'expiring'}>{selectedAdult.membership_status}</span>
+											<span class="info-value" class:membership-expired={selectedAdult.is_membership_expired} class:membership-expiring={selectedAdult.has_membership_issue && !selectedAdult.is_membership_expired}>{selectedAdult.membership_status}</span>
 										</div>
 									{/if}
 								</div>
@@ -1882,13 +1884,13 @@
 									{#if selectedAdult.ypt_status}
 										<div class="info-item">
 											<span class="info-label">YPT</span>
-											<span class="info-value" class:status-expired={selectedAdult.ypt_style === 'expired'} class:status-expiring={selectedAdult.ypt_style === 'expiring'} class:status-active={selectedAdult.ypt_style === 'current'}>{selectedAdult.ypt_status}</span>
+											<span class="info-value" class:status-expired={selectedAdult.is_ypt_expired} class:status-expiring={selectedAdult.has_ypt_issue && !selectedAdult.is_ypt_expired} class:status-active={!selectedAdult.has_ypt_issue}>{selectedAdult.ypt_status}</span>
 										</div>
 									{/if}
 									{#if selectedAdult.position_trained}
 										<div class="info-item">
 											<span class="info-label">Position</span>
-											<span class="info-value" class:status-active={selectedAdult.position_trained === 'Trained'} class:status-expired={selectedAdult.position_trained === 'Not Trained'}>{selectedAdult.position_trained}</span>
+											<span class="info-value" class:status-active={!selectedAdult.needs_training} class:status-expired={selectedAdult.needs_training}>{selectedAdult.position_trained}</span>
 										</div>
 									{/if}
 								</div>
@@ -1938,10 +1940,8 @@
 									<tr><td>Council</td><td>{unitInfo.council_name || ''}</td></tr>
 									<tr><td>District</td><td>{unitInfo.district_name || ''}</td></tr>
 									<tr><td>Chartered Org</td><td>{unitInfo.charter_org_name || ''}</td></tr>
-									{#if unitInfo.charter_expiry}
-										{@const charterDate = new Date(unitInfo.charter_expiry + 'T00:00:00')}
-										{@const charterExpired = charterDate < new Date()}
-										<tr><td>Charter Status</td><td class={charterExpired ? 'status-expired' : 'status-active'}>{charterExpired ? 'Expired' : 'Expires'} {charterDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}</td></tr>
+									{#if unitInfo.charter_status_display}
+										<tr><td>Charter Status</td><td class={unitInfo.charter_expired ? 'status-expired' : 'status-active'}>{unitInfo.charter_status_display}</td></tr>
 									{/if}
 									{#if unitInfo.website}
 										<tr><td>Website</td><td class="break-url">{unitInfo.website}</td></tr>
@@ -2070,7 +2070,7 @@
 									<thead><tr><th>Scout</th><th>Status</th></tr></thead>
 									<tbody>
 										{#each scoutRenewals as y}
-											<tr><td>{y.display_name}</td><td class={y.membership_style === 'expired' ? 'status-expired' : 'status-expiring'}>{y.membership_status}</td></tr>
+											<tr><td>{y.display_name}</td><td class={y.is_membership_expired ? 'status-expired' : 'status-expiring'}>{y.membership_status}</td></tr>
 										{/each}
 									</tbody>
 								</table>
@@ -2081,7 +2081,7 @@
 									<thead><tr><th>Adult</th><th>Status</th></tr></thead>
 									<tbody>
 										{#each adultRenewals as a}
-											<tr><td>{a.display_name}</td><td class={a.membership_style === 'expired' ? 'status-expired' : 'status-expiring'}>{a.membership_status}</td></tr>
+											<tr><td>{a.display_name}</td><td class={a.is_membership_expired ? 'status-expired' : 'status-expiring'}>{a.membership_status}</td></tr>
 										{/each}
 									</tbody>
 								</table>
@@ -2099,7 +2099,7 @@
 									<thead><tr><th>Adult</th><th>YPT Status</th></tr></thead>
 									<tbody>
 										{#each yptIssues as a}
-											<tr><td>{a.display_name}</td><td class={a.ypt_style === 'expired' ? 'status-expired' : 'status-expiring'}>{a.ypt_status}</td></tr>
+											<tr><td>{a.display_name}</td><td class={a.is_ypt_expired ? 'status-expired' : 'status-expiring'}>{a.ypt_status}</td></tr>
 										{/each}
 									</tbody>
 								</table>
@@ -2110,7 +2110,7 @@
 									<thead><tr><th>Adult</th><th>Status</th></tr></thead>
 									<tbody>
 										{#each notTrained as a}
-											<tr><td>{a.display_name}</td><td class="status-expired">Not Trained</td></tr>
+											<tr><td>{a.display_name}</td><td class="status-expired">{a.position_trained}</td></tr>
 										{/each}
 									</tbody>
 								</table>
@@ -2144,8 +2144,7 @@
 		<!-- Status Bar -->
 		<footer class="status-bar">
 			<div class="status-left">
-				<!-- Desktop: full status text -->
-				<div class="status-desktop">
+				<button class="status-btn" onclick={() => { showStatusModal = true; }}>
 					{#if refreshProgress}
 						<div class="refresh-bar">
 							<div
@@ -2153,39 +2152,18 @@
 								style="width: {(refreshProgress.current / refreshProgress.total) * 100}%"
 							></div>
 						</div>
-					{/if}
-					{#if statusErrors.length > 0}
-						<button class="status-error-btn" onclick={() => { showErrors = true; }}>{statusMessage}</button>
-					{:else}
-						<span>{statusMessage}</span>
-					{/if}
-
-					{#if activeTab === 'events' && calendarUrl}
-						<span class="calendar-url">Subscribe: {calendarUrl}</span>
-					{/if}
-				</div>
-				<!-- Mobile: compact tappable status -->
-				<button class="status-mobile" onclick={() => { showStatusModal = true; }}>
-					{#if refreshProgress}
-						Updating ({refreshProgress.current}/{refreshProgress.total})...
+						{refreshProgress.step}
 					{:else if statusErrors.length > 0}
 						<span class="status-error-dot"></span> {statusErrors.length} error{statusErrors.length === 1 ? '' : 's'}
 					{:else}
 						Status
 					{/if}
 				</button>
+				{#if activeTab === 'events' && calendarUrl}
+					<span class="calendar-url">Subscribe: {calendarUrl}</span>
+				{/if}
 			</div>
 			{#if offlineMode}<span class="offline-indicator">OFFLINE</span>{/if}
-			<span class="cache-info">
-				{#if cacheAges}
-					{#if cacheAges.youth}Roster: {cacheAges.youth}{/if}
-					{#if cacheAges.events}&middot; Events: {cacheAges.events}{/if}
-					{#if cacheAges.advancement}&middot; Advancement: {cacheAges.advancement}{/if}
-					{#if !cacheAges.youth && !cacheAges.events && !cacheAges.advancement}No cache{/if}
-				{:else}
-					No cache
-				{/if}
-			</span>
 		</footer>
 	</div>
 {/if}
@@ -2246,7 +2224,7 @@
 						<div class="refresh-bar" style="width: 100%; margin: 0.5rem 0;">
 							<div class="refresh-fill" style="width: {(refreshProgress.current / refreshProgress.total) * 100}%"></div>
 						</div>
-						<span>{refreshProgress.step} ({refreshProgress.current}/{refreshProgress.total})</span>
+						<span>{refreshProgress.step}</span>
 					</div>
 				{/if}
 
@@ -2356,7 +2334,7 @@
 	}
 
 	.error-message {
-		background: rgba(247, 118, 142, 0.1);
+		background: rgba(192, 64, 64, 0.1);
 		border: 1px solid var(--error);
 		color: var(--error);
 		padding: 0.5rem 0.75rem;
@@ -2541,16 +2519,6 @@
 	/* Status Bar Indicators                                            */
 	/* ================================================================ */
 
-	.status-error-btn {
-		background: none;
-		border: none;
-		color: #ef4444;
-		font: inherit;
-		cursor: pointer;
-		text-decoration: underline dotted;
-		padding: 0;
-	}
-
 	.error-list {
 		text-align: left;
 		list-style: none;
@@ -2573,7 +2541,7 @@
 	}
 
 	.offline-indicator {
-		color: #ef4444;
+		color: #c04040;
 		font-weight: 700;
 		font-size: 0.75rem;
 	}
@@ -2652,7 +2620,7 @@
 
 	.data-table td {
 		padding: 0.45rem 0.75rem;
-		border-bottom: 1px solid rgba(59, 66, 97, 0.4);
+		border-bottom: 1px solid rgba(54, 56, 64, 0.5);
 	}
 
 	.data-table tbody tr {
@@ -2665,7 +2633,7 @@
 	}
 
 	.data-table tbody tr.selected {
-		background: rgba(122, 162, 247, 0.15);
+		background: rgba(64, 128, 192, 0.15);
 	}
 
 	.detail-table {
@@ -2684,7 +2652,7 @@
 
 	.detail-table td {
 		padding: 0.35rem 0.5rem;
-		border-bottom: 1px solid rgba(59, 66, 97, 0.3);
+		border-bottom: 1px solid rgba(54, 56, 64, 0.4);
 	}
 
 	.detail-table td.break-url {
@@ -2731,14 +2699,14 @@
 
 	.badge {
 		padding: 0.2rem 0.6rem;
-		background: rgba(122, 162, 247, 0.15);
+		background: rgba(64, 128, 192, 0.15);
 		color: var(--accent);
 		border-radius: 4px;
 		font-size: 0.8rem;
 	}
 
 	.badge-muted {
-		background: rgba(86, 95, 137, 0.2);
+		background: rgba(128, 128, 128, 0.15);
 		color: var(--text-muted);
 	}
 
@@ -2755,10 +2723,9 @@
 
 	.detail-section h3 {
 		font-size: 0.9rem;
-		color: var(--text-muted);
+		color: var(--gold);
 		margin-bottom: 0.5rem;
-		text-transform: uppercase;
-		letter-spacing: 0.05em;
+		letter-spacing: 0.02em;
 	}
 
 	.section-meta {
@@ -2792,13 +2759,13 @@
 	}
 
 	.completed-text {
-		color: var(--warning, #fbbf24);
+		color: var(--warning, #c0a040);
 		font-weight: bold;
 		font-size: 0.82rem;
 	}
 
 	.awarded-text {
-		color: var(--success, #4ade80);
+		color: var(--success, #60a060);
 		font-weight: bold;
 		font-size: 0.82rem;
 	}
@@ -2807,7 +2774,7 @@
 		display: inline-block;
 		margin-left: 0.4rem;
 		padding: 0 0.3rem;
-		background: rgba(187, 154, 247, 0.2);
+		background: rgba(160, 128, 192, 0.2);
 		color: var(--eagle);
 		border-radius: 3px;
 		font-size: 0.7rem;
@@ -2921,8 +2888,8 @@
 
 	.counselor-info {
 		padding: 0.5rem 0.75rem;
-		background: rgba(122, 162, 247, 0.08);
-		border: 1px solid rgba(122, 162, 247, 0.15);
+		background: rgba(64, 128, 192, 0.08);
+		border: 1px solid rgba(64, 128, 192, 0.15);
 		border-radius: 6px;
 		font-size: 0.82rem;
 		margin-bottom: 1rem;
@@ -3082,12 +3049,12 @@
 	}
 
 	.rsvp-indicator.yes {
-		background: rgba(158, 206, 106, 0.2);
+		background: rgba(96, 160, 96, 0.2);
 		color: var(--success);
 	}
 
 	.rsvp-indicator.no {
-		background: rgba(247, 118, 142, 0.2);
+		background: rgba(192, 64, 64, 0.2);
 		color: var(--error);
 	}
 
@@ -3104,7 +3071,7 @@
 
 	.info-card h3 {
 		font-size: 0.9rem;
-		color: var(--accent);
+		color: var(--gold);
 		margin-bottom: 0.75rem;
 	}
 
@@ -3139,31 +3106,31 @@
 	}
 
 	.info-value.membership-active {
-		color: var(--success, #4ade80);
+		color: var(--success, #60a060);
 	}
 
 	.info-value.membership-expired {
-		color: var(--error, #f87171);
+		color: var(--error, #c04040);
 	}
 
 	.status-expired {
-		color: var(--error, #f87171);
+		color: var(--error, #c04040);
 		font-weight: 600;
 	}
 
 	.status-expiring {
-		color: var(--warning, #fbbf24);
+		color: var(--warning, #c0a040);
 		font-weight: 600;
 	}
 
 	.status-active {
-		color: var(--success, #4ade80);
+		color: var(--success, #60a060);
 	}
 
 	.parent-card {
 		margin-bottom: 0.75rem;
 		padding: 0.5rem 0;
-		border-bottom: 1px solid rgba(59, 66, 97, 0.3);
+		border-bottom: 1px solid rgba(54, 56, 64, 0.4);
 	}
 
 	.parent-card:last-child {
@@ -3246,34 +3213,28 @@
 		transition: width 0.2s ease;
 	}
 
-	.cache-info {
-		opacity: 0.7;
-		white-space: nowrap;
-	}
-
 	.calendar-url {
 		opacity: 0.7;
 		font-size: 0.7rem;
 		margin-left: 0.5rem;
 	}
 
-	/* Desktop shows full status, mobile shows compact button */
-	.status-desktop {
-		display: flex;
+	.status-btn {
+		display: inline-flex;
 		align-items: center;
-		gap: 0.5rem;
-	}
-
-	.status-mobile {
-		display: none;
+		gap: 0.4rem;
 		background: none;
 		border: none;
 		color: var(--text-muted);
-		font-size: 0.7rem;
+		font-size: 0.75rem;
 		padding: 0.2rem 0.4rem;
 		cursor: pointer;
 		text-decoration: underline;
 		text-decoration-style: dotted;
+	}
+
+	.status-btn:hover {
+		color: var(--text);
 	}
 
 	.status-error-dot {
@@ -3281,7 +3242,7 @@
 		width: 6px;
 		height: 6px;
 		border-radius: 50%;
-		background: var(--error, #e74c3c);
+		background: var(--error, #c04040);
 		vertical-align: middle;
 	}
 
@@ -3519,18 +3480,6 @@
 		.status-bar {
 			padding: 0.3rem 0.5rem env(safe-area-inset-bottom, 0);
 			font-size: 0.7rem;
-		}
-
-		.status-desktop {
-			display: none;
-		}
-
-		.status-mobile {
-			display: inline;
-		}
-
-		.cache-info {
-			display: none;
 		}
 
 		/* Back button: larger tap target */

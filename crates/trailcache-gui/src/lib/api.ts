@@ -5,31 +5,9 @@ import type {
 	AdultDisplay,
 	AwardDisplay,
 	BadgePivotEntry,
-	BadgeRequirementsResponseDisplay,
-	CacheAges,
-	Commissioner,
-	EventDisplay,
-	EventGuestDisplay,
-	Key3Leaders,
-	LeadershipDisplay,
-	MeritBadgeDisplay,
-	OrgProfile,
-	ParentDisplay,
-	Patrol,
-	RankPivotEntry,
-	RankProgressDisplay,
-	RankRequirementDisplay,
-	UnitInfo,
-	YouthDisplay
-} from '$lib/bindings';
-
-// Re-export all generated types
-export type {
-	AdultDisplay,
-	AwardDisplay,
-	BadgePivotEntry,
 	BadgePivotScout,
 	BadgeRequirementsResponseDisplay,
+	BadgeSummary,
 	CacheAges,
 	Commissioner,
 	EventDisplay,
@@ -49,6 +27,38 @@ export type {
 	RankRequirementDisplay,
 	UnitContact,
 	UnitInfo,
+	YouthBadgesResponse,
+	YouthDisplay
+} from '$lib/bindings';
+
+// Re-export all generated types
+export type {
+	AdultDisplay,
+	AwardDisplay,
+	BadgePivotEntry,
+	BadgePivotScout,
+	BadgeRequirementsResponseDisplay,
+	BadgeSummary,
+	CacheAges,
+	Commissioner,
+	EventDisplay,
+	EventGuestDisplay,
+	Key3Leaders,
+	Leader,
+	LeadershipDisplay,
+	MeetingLocation,
+	MeritBadgeDisplay,
+	MeritBadgeRequirementDisplay,
+	OrgProfile,
+	ParentDisplay,
+	Patrol,
+	RankPivotEntry,
+	RankPivotScout,
+	RankProgressDisplay,
+	RankRequirementDisplay,
+	UnitContact,
+	UnitInfo,
+	YouthBadgesResponse,
 	YouthDisplay
 } from '$lib/bindings';
 
@@ -128,7 +138,7 @@ export async function getYouthRanks(userId: number): Promise<RankProgressDisplay
 	return invoke('get_youth_ranks', { userId });
 }
 
-export async function getYouthMeritBadges(userId: number): Promise<MeritBadgeDisplay[]> {
+export async function getYouthMeritBadges(userId: number): Promise<YouthBadgesResponse> {
 	return invoke('get_youth_merit_badges', { userId });
 }
 
@@ -176,6 +186,14 @@ export async function getOfflineMode(): Promise<boolean> {
 
 export async function setOfflineMode(offline: boolean): Promise<boolean> {
 	return invoke('set_offline_mode', { offline });
+}
+
+export async function cacheForOffline(): Promise<string> {
+	return invoke('cache_for_offline');
+}
+
+export async function quitApp(): Promise<void> {
+	return invoke('quit_app');
 }
 
 export async function onRefreshProgress(

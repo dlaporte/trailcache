@@ -44,6 +44,25 @@ pub struct UnitInfo {
     pub charter_expiry: Option<String>,
     pub meeting_location: Option<MeetingLocation>,
     pub contacts: Vec<UnitContact>,
+    /// Pre-computed charter status display text, e.g. "Expires Mar 15, 2026".
+    #[serde(default)]
+    pub charter_status_display: Option<String>,
+    /// Pre-computed flag: true if charter is expired.
+    #[serde(default)]
+    pub charter_expired: Option<bool>,
+}
+
+impl UnitInfo {
+    /// Populate computed charter fields from `charter_expiry`.
+    pub fn with_computed_fields(mut self) -> Self {
+        if let Some(ref expiry) = self.charter_expiry {
+            if let Some((status, formatted)) = crate::utils::check_expiration(expiry) {
+                self.charter_status_display = Some(status.format_expiry(&formatted));
+                self.charter_expired = Some(matches!(status, crate::utils::ExpirationStatus::Expired));
+            }
+        }
+        self
+    }
 }
 
 /// Meeting location address.

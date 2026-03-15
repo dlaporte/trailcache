@@ -13,7 +13,8 @@ use ratatui::{
 };
 
 use crate::app::{App, Focus};
-use trailcache_core::models::{MeritBadgeProgress, Youth};
+use trailcache_core::models::{MeritBadgeProgress, MeritBadgeRequirement, StatusCategory, Youth};
+use trailcache_core::models::advancement::format_date;
 use trailcache_core::models::pivot::{group_youth_by_badge, BadgeGroup, BadgeGroupEntry};
 use crate::ui::styles;
 use trailcache_core::utils::{strip_html, wrap_text};
@@ -34,29 +35,17 @@ pub fn get_badge_list(
     sort_by_count: bool,
     sort_ascending: bool,
 ) -> Vec<(String, bool, usize)> {
-    let grouped = get_badges_with_scouts(youth, all_badges);
-    let mut result: Vec<(String, bool, usize)> = grouped
-        .into_iter()
-        .map(|g| (g.badge_name, g.is_eagle_required, g.scouts.len()))
-        .collect();
-
-    if sort_by_count {
-        // Sort by count
-        if sort_ascending {
-            result.sort_by(|a, b| a.2.cmp(&b.2).then_with(|| a.0.to_lowercase().cmp(&b.0.to_lowercase())));
-        } else {
-            result.sort_by(|a, b| b.2.cmp(&a.2).then_with(|| a.0.to_lowercase().cmp(&b.0.to_lowercase())));
-        }
-    } else {
-        // Sort by name
-        if sort_ascending {
-            result.sort_by(|a, b| a.0.to_lowercase().cmp(&b.0.to_lowercase()));
-        } else {
-            result.sort_by(|a, b| b.0.to_lowercase().cmp(&a.0.to_lowercase()));
-        }
+    use trailcache_core::models::pivot::badge_list;
+    let mut entries = badge_list(youth, all_badges, sort_by_count);
+    // Core sorts count desc / name asc by default.
+    // For count: default is desc, so reverse if ascending.
+    // For name: default is asc, so reverse if not ascending.
+    if sort_by_count && sort_ascending {
+        entries.reverse();
+    } else if !sort_by_count && !sort_ascending {
+        entries.reverse();
     }
-
-    result
+    entries.into_iter().map(|e| (e.name, e.is_eagle_required, e.count)).collect()
 }
 
 pub fn render(frame: &mut Frame, app: &mut App, area: Rect) {
@@ -182,28 +171,11 @@ fn render_scout_list(frame: &mut Frame, app: &mut App, area: Rect) {
                 styles::list_item_style()
             };
 
-            let format_date = |d: &str| -> String {
-                chrono::NaiveDate::parse_from_str(&d[..10.min(d.len())], "%Y-%m-%d")
-                    .ok()
-                    .map(|parsed| parsed.format("%b %d, %Y").to_string())
-                    .unwrap_or_else(|| d.chars().take(10).collect())
-            };
-
-            let progress = if entry.badge.is_awarded() {
-                let date = entry.badge.awarded_date.as_ref()
-                    .or(entry.badge.date_completed.as_ref())
-                    .map(|d| format_date(d))
-                    .unwrap_or_else(|| "Awarded".to_string());
-                (date, styles::success_style())
-            } else if entry.badge.is_completed() {
-                let date = entry.badge.date_completed.as_ref()
-                    .map(|d| format_date(d))
-                    .unwrap_or_else(|| "Done".to_string());
-                (date, styles::highlight_style())
-            } else if let Some(pct) = entry.badge.progress_percent() {
-                (format!("{}%", pct), styles::muted_style())
-            } else {
-                ("-".to_string(), styles::muted_style())
+            let progress = match entry.badge.status_display() {
+                (StatusCategory::Awarded, text) => (text, styles::success_style()),
+                (StatusCategory::Completed, text) => (text, styles::highlight_style()),
+                (StatusCategory::InProgress, text) => (text, styles::muted_style()),
+                (StatusCategory::None, _) => ("-".to_string(), styles::muted_style()),
             };
 
             Row::new(vec![
@@ -280,8 +252,7 @@ fn render_requirements_view(frame: &mut Frame, app: &mut App, area: Rect, focuse
         }
 
         // Count completed
-        let completed = app.selected_badge_requirements.iter().filter(|r| r.is_completed()).count();
-        let total = app.selected_badge_requirements.len();
+        let (completed, total) = MeritBadgeRequirement::completion_count(&app.selected_badge_requirements);
         lines.push(Line::from(vec![
             Span::styled("Progress: ", styles::muted_style()),
             Span::styled(format!("{}/{}", completed, total), styles::highlight_style()),
@@ -322,10 +293,7 @@ fn render_requirements_view(frame: &mut Frame, app: &mut App, area: Rect, focuse
             if is_selected && req.is_completed() {
                 if let Some(ref date) = req.date_completed {
                     if !date.is_empty() {
-                        let formatted_date = chrono::NaiveDate::parse_from_str(&date[..10.min(date.len())], "%Y-%m-%d")
-                            .ok()
-                            .map(|d| d.format("%b %d, %Y").to_string())
-                            .unwrap_or_else(|| date.chars().take(10).collect());
+                        let formatted_date = format_date(Some(date.as_str()));
                         lines.push(Line::from(vec![
                             Span::raw("          "),
                             Span::styled("Completed: ", styles::muted_style()),

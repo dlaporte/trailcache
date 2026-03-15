@@ -5,4 +5,4 @@ import type { UnitContact } from "./UnitContact";
 /**
  * Unit registration and contact information.
  */
-export type UnitInfo = { name: string | null, website: string | null, registration_url: string | null, district_name: string | null, council_name: string | null, charter_org_name: string | null, charter_expiry: string | null, meeting_location: MeetingLocation | null, contacts: Array<UnitContact>, };
+export type UnitInfo = { name: string | null, website: string | null, registration_url: string | null, district_name: string | null, council_name: string | null, charter_org_name: string | null, charter_expiry: string | null, meeting_location: MeetingLocation | null, contacts: Array<UnitContact>, charter_status_display: string | null, charter_expired: boolean | null, };

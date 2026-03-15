@@ -7,7 +7,7 @@ use ratatui::{
 
 use crate::app::{App, EventDetailView, Focus};
 use trailcache_core::models::RsvpStatus;
-use trailcache_core::utils::strip_html;
+use trailcache_core::utils::{strip_html, wrap_text};
 use crate::ui::styles;
 
 pub fn render(frame: &mut Frame, app: &mut App, area: Rect) {
@@ -163,22 +163,8 @@ fn render_details_view(frame: &mut Frame, app: &mut App, area: Rect, focused: bo
 
             if event.rsvp {
                 // RSVP is required - show counts from invited_users
-                let adult_yes = event.invited_users.iter()
-                    .filter(|u| u.is_adult)
-                    .filter(|u| matches!(u.status(), RsvpStatus::Going))
-                    .count();
-                let adult_no = event.invited_users.iter()
-                    .filter(|u| u.is_adult)
-                    .filter(|u| matches!(u.status(), RsvpStatus::NotGoing))
-                    .count();
-                let scout_yes = event.invited_users.iter()
-                    .filter(|u| !u.is_adult)
-                    .filter(|u| matches!(u.status(), RsvpStatus::Going))
-                    .count();
-                let scout_no = event.invited_users.iter()
-                    .filter(|u| !u.is_adult)
-                    .filter(|u| matches!(u.status(), RsvpStatus::NotGoing))
-                    .count();
+                let (adult_yes, adult_no) = event.adult_rsvp_counts();
+                let (scout_yes, scout_no) = event.scout_rsvp_counts();
 
                 lines.push(Line::from(vec![
                     Span::styled("  Adults: ", styles::muted_style()),
@@ -254,15 +240,7 @@ fn render_rsvp_view(frame: &mut Frame, app: &mut App, area: Rect, focused: bool)
             lines.push(Line::from(""));
 
             // Filter to only Yes and No (exclude NoResponse)
-            let adults: Vec<_> = event.invited_users.iter()
-                .filter(|u| u.is_adult)
-                .filter(|u| matches!(u.status(), RsvpStatus::Going | RsvpStatus::NotGoing))
-                .collect();
-
-            let scouts: Vec<_> = event.invited_users.iter()
-                .filter(|u| !u.is_adult)
-                .filter(|u| matches!(u.status(), RsvpStatus::Going | RsvpStatus::NotGoing))
-                .collect();
+            let (adults, scouts) = event.respondents();
 
             if adults.is_empty() && scouts.is_empty() {
                 lines.push(Line::from(Span::styled(
@@ -331,26 +309,4 @@ fn render_rsvp_view(frame: &mut Frame, app: &mut App, area: Rect, focused: bool)
     frame.render_widget(paragraph, area);
 }
 
-fn wrap_text(s: &str, max_width: usize) -> Vec<String> {
-    let mut lines = Vec::new();
-    let mut current_line = String::new();
-
-    for word in s.split_whitespace() {
-        if current_line.is_empty() {
-            current_line = word.to_string();
-        } else if current_line.len() + 1 + word.len() <= max_width {
-            current_line.push(' ');
-            current_line.push_str(word);
-        } else {
-            lines.push(current_line);
-            current_line = word.to_string();
-        }
-    }
-
-    if !current_line.is_empty() {
-        lines.push(current_line);
-    }
-
-    lines
-}
 

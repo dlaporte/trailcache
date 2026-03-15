@@ -77,7 +77,7 @@ async fn main() -> Result<()> {
     let mut app = App::new().await?;
 
     // Load cached data first (for display behind login)
-    let _ = app.load_from_cache().await;
+    let _ = app.load_from_cache();
 
     // Always require login to derive encryption key for cache
     // (password is needed to decrypt cached data)

@@ -456,8 +456,7 @@ impl ApiClient {
 
         let mut ranks: Vec<RankProgress> = Vec::new();
         for program in &parsed.program {
-            if program.program_id == 2 {
-                // Scouts BSA
+            if program.program_id == crate::models::PROGRAM_ID_SCOUTS_BSA {
                 for rank in &program.ranks {
                     ranks.push(RankProgress::from_api(rank));
                 }
@@ -562,6 +561,36 @@ impl ApiClient {
         let rank: RankWithRequirements = serde_json::from_str(&text)
             .context("Failed to parse rank requirements")?;
         Ok(rank.requirements)
+    }
+
+    /// Fetch badge requirements only (no counselor info). Single API call.
+    /// Use this for bulk/offline caching where counselor data isn't needed.
+    pub async fn fetch_badge_requirements_only(&self, user_id: i64, badge_id: i64) -> Result<(Vec<MeritBadgeRequirement>, Option<String>)> {
+        let req_url = format!(
+            "{}/advancements/v2/youth/{}/meritBadges/{}/requirements",
+            API_BASE_URL, user_id, badge_id
+        );
+        let response = self
+            .client
+            .get(&req_url)
+            .headers(self.auth_headers()?)
+            .send()
+            .await?;
+
+        if !response.status().is_success() {
+            anyhow::bail!("Badge requirements request failed: {}", response.status());
+        }
+
+        let text = response.text().await?;
+
+        if let Ok(badge) = serde_json::from_str::<MeritBadgeWithRequirements>(&text) {
+            return Ok((badge.requirements, badge.version));
+        }
+        if let Ok(reqs) = serde_json::from_str::<Vec<MeritBadgeRequirement>>(&text) {
+            return Ok((reqs, None));
+        }
+
+        Ok((vec![], None))
     }
 
     /// Fetch badge requirements, returns (requirements, version, counselor)
@@ -889,6 +918,8 @@ impl ApiClient {
                 email: c.email.clone(),
                 phone: c.phone.clone(),
             }).collect(),
+            charter_status_display: None,
+            charter_expired: None,
         })
     }
 
