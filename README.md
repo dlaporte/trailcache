@@ -32,7 +32,7 @@ Trailcache loads your data in under a second. Keyboard-driven navigation means y
 
 Runs everywhere your troop goes:
 - **Terminal (TUI)** — macOS, Windows, Linux
-- **Desktop (GUI)** — macOS (.dmg)
+- **Desktop (GUI)** — macOS (.dmg), Windows (.msi/.exe)
 - **Mobile** — iOS and Android
 
 ---
@@ -74,7 +74,9 @@ Picture this: You're at summer camp. It's merit badge midway. Scouts are asking 
 
 ### Desktop App (GUI)
 
-**macOS:** Download the `.dmg` from the [GitHub Releases](https://github.com/dlaporte/trailcache/releases) page.
+Download from the [GitHub Releases](https://github.com/dlaporte/trailcache/releases) page:
+- **macOS:** `.dmg` (signed and notarized)
+- **Windows:** `.msi` or `.exe` installer
 
 ### Mobile
 

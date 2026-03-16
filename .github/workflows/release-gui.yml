@@ -1,4 +1,5 @@
-# Build the Tauri GUI app (.dmg for macOS) and attach to the GitHub Release.
+# Build the Tauri GUI app for macOS (.dmg) and Windows (.msi)
+# and attach to the GitHub Release.
 # Triggered by the same version tags as the TUI release workflow.
 
 name: Release GUI
@@ -12,7 +13,7 @@ on:
       - '**[0-9]+.[0-9]+.[0-9]+*'
 
 jobs:
-  build-gui:
+  build-macos:
     runs-on: macos-latest
     env:
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -46,13 +47,7 @@ jobs:
           security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$KEYCHAIN_PASSWORD" $KEYCHAIN_PATH
           security list-keychains -d user -s $KEYCHAIN_PATH
           security default-keychain -s $KEYCHAIN_PATH
-          # Debug: show what was imported
-          echo "=== Identities in keychain ==="
           security find-identity -v -p codesigning $KEYCHAIN_PATH
-          echo "=== Keychain search list ==="
-          security list-keychains -d user
-          echo "=== Test codesign access ==="
-          security find-identity -v -p codesigning
           rm certificate.p12
 
       - name: Build Tauri app
@@ -64,7 +59,6 @@ jobs:
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
           KEYCHAIN_PASSWORD: ${{ secrets.KEYCHAIN_PASSWORD }}
         run: |
-          # Ensure keychain is still unlocked before build
           security unlock-keychain -p "$KEYCHAIN_PASSWORD" $RUNNER_TEMP/build.keychain-db
           npm run tauri build
 
@@ -85,11 +79,68 @@ jobs:
             gh release create "${{ github.ref_name }}" --title "${{ github.ref_name }}" --generate-notes
           fi
 
-          # Find .dmg in workspace target dir (not crate-local)
           DMG=$(find target/release/bundle/dmg -name "*.dmg" 2>/dev/null | head -1)
           if [ -n "$DMG" ]; then
             gh release upload "${{ github.ref_name }}" "$DMG" --clobber
           else
             echo "No .dmg found, skipping upload"
+            exit 1
+          fi
+
+  build-windows:
+    runs-on: windows-latest
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install frontend dependencies
+        working-directory: crates/trailcache-gui
+        run: npm ci
+
+      - name: Build Tauri app
+        working-directory: crates/trailcache-gui
+        run: npm run tauri build
+
+      - name: Upload installers to GitHub Release
+        shell: bash
+        run: |
+          # Wait for the release to exist
+          for i in 1 2 3 4 5 6 7 8 9 10; do
+            if gh release view "${{ github.ref_name }}" > /dev/null 2>&1; then
+              break
+            fi
+            echo "Waiting for release to be created... (attempt $i)"
+            sleep 30
+          done
+
+          # Create the release ourselves if it doesn't exist yet
+          if ! gh release view "${{ github.ref_name }}" > /dev/null 2>&1; then
+            echo "Creating release ${{ github.ref_name }}"
+            gh release create "${{ github.ref_name }}" --title "${{ github.ref_name }}" --generate-notes
+          fi
+
+          # Upload .msi
+          MSI=$(find target/release/bundle/msi -name "*.msi" 2>/dev/null | head -1)
+          if [ -n "$MSI" ]; then
+            gh release upload "${{ github.ref_name }}" "$MSI" --clobber
+          fi
+
+          # Upload .exe (NSIS installer)
+          EXE=$(find target/release/bundle/nsis -name "*.exe" 2>/dev/null | head -1)
+          if [ -n "$EXE" ]; then
+            gh release upload "${{ github.ref_name }}" "$EXE" --clobber
+          fi
+
+          if [ -z "$MSI" ] && [ -z "$EXE" ]; then
+            echo "No .msi or .exe found"
             exit 1
           fi
