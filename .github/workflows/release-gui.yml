@@ -144,3 +144,35 @@ jobs:
             echo "No .msi or .exe found"
             exit 1
           fi
+
+  update-release-notes:
+    needs: [build-macos, build-windows]
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    steps:
+      - name: Prepend GUI download section to release notes
+        run: |
+          TAG="${{ github.ref_name }}"
+          VERSION="${TAG#v}"
+          REPO="${{ github.repository }}"
+          BASE="https://github.com/${REPO}/releases/download/${TAG}"
+
+          # Get existing release body
+          gh release view "$TAG" --repo "$REPO" --json body --jq '.body' > /tmp/existing.md
+
+          # Build combined notes: GUI section first, then existing TUI notes
+          {
+          echo "## Desktop App (GUI)"
+          echo ""
+          echo "| File | Platform |"
+          echo "|------|----------|"
+          echo "| [Trailcache_${VERSION}_aarch64.dmg](${BASE}/Trailcache_${VERSION}_aarch64.dmg) | macOS (Apple Silicon) |"
+          echo "| [Trailcache_${VERSION}_x64-setup.exe](${BASE}/Trailcache_${VERSION}_x64-setup.exe) | Windows installer (.exe) |"
+          echo "| [Trailcache_${VERSION}_x64_en-US.msi](${BASE}/Trailcache_${VERSION}_x64_en-US.msi) | Windows installer (.msi) |"
+          echo ""
+          echo "---"
+          echo ""
+          cat /tmp/existing.md
+          } > /tmp/notes.md
+          gh release edit "$TAG" --repo "$REPO" --notes-file /tmp/notes.md
