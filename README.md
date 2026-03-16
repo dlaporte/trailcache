@@ -1,12 +1,16 @@
-```
- _____         _ _  ____           _
-|_   _| __ __ _(_) |/ ___|__ _  ___| |__   ___
-  | || '__/ _` | | | |   / _` |/ __| '_ \ / _ \
-  | || | | (_| | | | |__| (_| | (__| | | |  __/
-  |_||_|  \__,_|_|_|\____\__,_|\___|_| |_|\___|
+<p align="center">
+  <img src="logo.png" alt="Trailcache" width="200">
+</p>
 
-       BE PREPARED... EVEN WITHOUT A SIGNAL.
-```
+<h1 align="center">Trailcache</h1>
+
+<p align="center"><strong>BE PREPARED... EVEN WITHOUT A SIGNAL.</strong></p>
+
+<p align="center">
+  <a href="https://crates.io/crates/trailcache-tui"><img src="https://img.shields.io/crates/v/trailcache-tui.svg" alt="crates.io"></a>
+  <a href="https://github.com/dlaporte/trailcache/releases/latest"><img src="https://img.shields.io/github/v/release/dlaporte/trailcache" alt="GitHub Release"></a>
+  <a href="https://github.com/dlaporte/trailcache/blob/master/LICENSE"><img src="https://img.shields.io/crates/l/trailcache-tui" alt="License: MIT"></a>
+</p>
 
 ---
 
@@ -14,11 +18,11 @@
 
 You're deep in the backcountry. A scout asks if they've completed all their Second Class requirements. Another needs to know which merit badges they're registered for. The sun is setting, the campfire is calling, and your phone shows exactly zero bars.
 
-Trailcache keeps your troop's Scoutbook data cached locally, ready whenever you need it—whether you're in a basement meeting room or on a mountaintop.
+Trailcache keeps your troop's Scoutbook data cached locally, ready whenever you need it — whether you're in a basement meeting room or on a mountaintop.
 
 ---
 
-## WHY TRAILCACHE?
+## Why Trailcache?
 
 ### Take Your Data Into the Field
 
@@ -26,40 +30,40 @@ Your troop data goes where you go. Cache it before the campout, access it anywhe
 
 ### Blazing Fast
 
-Trailcache loads your data in under a second. Keyboard-driven navigation means you get answers as fast as you can type. Your terminal is ready before you finish sitting down.
+Trailcache loads your data in under a second. Navigate instantly across scouts, ranks, badges, events, and leaders. Your answers are ready before you finish sitting down.
 
 ### Cross-Platform
 
 Runs everywhere your troop goes:
-- **Terminal (TUI)** — macOS, Windows, Linux
-- **Desktop (GUI)** — macOS (.dmg), Windows (.msi/.exe)
-- **Mobile** — iOS and Android
+- **Desktop** — macOS (signed .dmg) and Windows (.msi / .exe)
+- **Terminal** — macOS, Windows, Linux (keyboard-driven TUI)
+- **Mobile** — iOS and Android (coming soon)
 
 ---
 
-## FEATURES
+## Features
 
-```
-[1] SCOUTS      Your complete youth roster. Names, ranks, patrols,
-                advancement status. Sorted any way you want it.
+### Scouts
+Your complete youth roster — names, ranks, patrols, leadership positions, and advancement status. Drill into any scout to see their full profile including rank progress, merit badges, and awards. Sort and search across the entire troop.
 
-[2] RANKS       Track rank advancement across the troop. See who's
-                close to their next rank and what they still need.
+### Ranks
+Track rank advancement across every scout in the troop. See at a glance who's close to their next rank, what requirements they've completed, and who's ready for a Board of Review. Pivot tables show the full picture.
 
-[3] BADGES      Merit badge progress at a glance. Who's working on
-                what, and how far along they are.
+### Merit Badges
+Merit badge progress for every scout, all in one place. See who's working on what, how many requirements are complete, and which badges have been awarded. Track Eagle-required badges and overall progress toward Eagle.
 
-[4] EVENTS      Campouts, meetings, service projects. See who's RSVP'd.
-                Plan your next adventure.
+### Events
+Campouts, meetings, service projects, and more. See RSVP status for every event — who's going, who's not, and who hasn't responded. Adult and scout counts at a glance.
 
-[5] ADULTS      Leaders, committee members, parents. All the grown-ups
-                who make it happen.
+### Adults
+Leaders, committee members, and parents. View positions, training status (YPT), membership expiration, and contact information. Quickly identify who needs to renew training.
 
-[6] UNIT        The big picture. Troop stats, awards ready to present,
-                everything at a glance.
-```
+### Unit
+The big picture — troop-level statistics, awards ready to present, and a summary of your unit's overall advancement status.
 
-## ON THE TRAIL
+---
+
+## On the Trail
 
 Picture this: You're at summer camp. It's merit badge midway. Scouts are asking what they're signed up for, parents are texting questions you can't answer without data, and the camp WiFi is... well, it's camp WiFi.
 
@@ -70,96 +74,61 @@ Picture this: You're at summer camp. It's merit badge midway. Scouts are asking 
 
 ---
 
-## INSTALLATION
+## Installation
 
-### Desktop App (GUI)
+Download the latest release for your platform from the [GitHub Releases](https://github.com/dlaporte/trailcache/releases) page:
 
-Download from the [GitHub Releases](https://github.com/dlaporte/trailcache/releases) page:
-- **macOS:** `.dmg` (signed and notarized)
-- **Windows:** `.msi` or `.exe` installer
+| Platform | Download |
+|----------|----------|
+| macOS (Desktop) | `.dmg` — signed and notarized |
+| Windows (Desktop) | `.msi` or `.exe` installer |
+| macOS / Linux (Terminal) | Pre-built binaries or install script |
+| Windows (Terminal) | Pre-built binary or PowerShell install script |
 
-### Mobile
-
-**iOS / Android:** Coming soon to the App Store and Google Play.
-
-### Terminal App (TUI)
-
-**From crates.io (Recommended):**
+**Or install the terminal app from crates.io:**
 ```bash
 cargo install trailcache-tui
 ```
 
-**One-line install script — macOS / Linux:**
-```bash
-curl --proto '=https' --tlsv1.2 -LsSf https://github.com/dlaporte/trailcache/releases/latest/download/trailcache-installer.sh | sh
-```
-
-**One-line install script — Windows (PowerShell):**
-```powershell
-irm https://github.com/dlaporte/trailcache/releases/latest/download/trailcache-installer.ps1 | iex
-```
-
-**Pre-built binaries:** Download for your platform from [GitHub Releases](https://github.com/dlaporte/trailcache/releases).
-
-**From source:**
-```bash
-git clone https://github.com/dlaporte/trailcache.git
-cd trailcache
-cargo build --release -p trailcache-tui
-./target/release/trailcache
-```
-
 ---
 
-## KEYBOARD CONTROLS
-
-```
-  NAVIGATION                    ACTIONS
-  ──────────────────────────    ──────────────────────────
-  1-6              Jump to tab  /         Search
-  Tab / Shift+Tab  Next/prev    Esc       Cancel / Back
-  j / Down         Move down    Enter     Select / Confirm
-  k / Up           Move up      r         Refresh data
-  h / Left         Previous     ?         Help
-  l / Right        Next         q         Quit
-  PgUp / PgDn      Fast scroll
-```
-
----
-
-## REQUIREMENTS
+## Requirements
 
 - Your Scouting.org credentials (same login as Scoutbook)
-- A terminal that supports Unicode (most do)
 - An internet connection (just once, to sync your data)
 
 ---
 
-## TECHNICAL DETAILS
+## Technical Details
 
-Built with Rust for maximum performance:
-- **ratatui** - Terminal UI framework
-- **tokio** - Async runtime for parallel data fetching
-- **reqwest** - HTTP client
-- **keyring** - Secure credential storage (OS keychain)
+Built with Rust for maximum performance and safety. Three crates, one codebase:
 
-Data is cached locally and refreshed in the background when connected, so you always have something to work with—online or off.
+- **trailcache-core** — Shared library handling Scoutbook API communication, data caching, encryption, and domain models
+- **trailcache-tui** — Terminal interface built with [ratatui](https://ratatui.rs), featuring keyboard-driven navigation and vim-style keybindings
+- **trailcache-gui** — Desktop application built with [Tauri](https://tauri.app) and [Svelte](https://svelte.dev), providing a modern native UI on macOS and Windows
+
+Key dependencies:
+- **tokio** — Async runtime for parallel data fetching
+- **reqwest** — HTTP client with rustls for cross-platform TLS
+- **keyring** — Secure credential storage via the OS keychain
+- **chacha20poly1305 + argon2** — Encryption at rest for cached data
+
+Data is cached locally and refreshed in the background when connected, so you always have something to work with — online or off.
 
 ---
 
-## SECURITY
+## Security
 
 Trailcache is designed with security as a priority:
 
 - **Direct Authentication** — Your credentials are sent directly to Scoutbook's servers and are never transmitted to any third-party service.
 - **Public APIs Only** — All data is retrieved using the same publicly available APIs that the Scoutbook website uses.
 - **Encrypted in Transit** — All communication with Scoutbook is encrypted over HTTPS.
-- **Encrypted at Rest** — Cached data is encrypted on your device using modern, standards-based encryption.
+- **Encrypted at Rest** — Cached data is encrypted on your device using modern, standards-based encryption (ChaCha20-Poly1305 with Argon2 key derivation).
 - **Open Source** — The complete source code is available for inspection. No hidden functionality, no telemetry, no surprises.
 
 ---
 
-## LICENSE
+## License
 
 MIT
-
