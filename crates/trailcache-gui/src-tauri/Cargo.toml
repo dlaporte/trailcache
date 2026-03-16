@@ -1,6 +1,6 @@
 [package]
 name = "trailcache-gui"
-version = "0.3.6"
+version = "0.3.7"
 description = "Trailcache GUI - cross-platform Scout troop management"
 authors = ["David LaPorte"]
 license = "MIT"
@@ -20,7 +20,7 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 tauri-build = { version = "2.5.4", features = [] }
 
 [dependencies]
-trailcache-core = { path = "../../trailcache-core", version = "0.3.6", features = ["ts"] }
+trailcache-core = { path = "../../trailcache-core", version = "0.3.7", features = ["ts"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 log = "0.4"
@@ -29,8 +29,8 @@ tauri = { version = "2.10.0", features = [] }
 tauri-plugin-log = "2"
 anyhow = "1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
-ts-rs = { workspace = true }
-chrono.workspace = true
+ts-rs = "10"
+chrono = { version = "0.4", features = ["serde"] }
 
 [target.'cfg(not(target_os = "ios"))'.dependencies]
 tauri-plugin-window-state = "2"

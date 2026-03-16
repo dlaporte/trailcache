@@ -2,12 +2,14 @@
 members = [
     "crates/trailcache-core",
     "crates/trailcache-tui",
+]
+exclude = [
     "crates/trailcache-gui/src-tauri",
 ]
 resolver = "2"
 
 [workspace.package]
-version = "0.3.6"
+version = "0.3.7"
 edition = "2021"
 authors = ["David LaPorte"]
 repository = "https://github.com/dlaporte/trailcache"
