@@ -9,7 +9,7 @@ exclude = [
 resolver = "2"
 
 [workspace.package]
-version = "0.3.7"
+version = "0.3.8"
 edition = "2021"
 authors = ["David LaPorte"]
 repository = "https://github.com/dlaporte/trailcache"

@@ -12,7 +12,7 @@ name = "trailcache"
 path = "src/main.rs"
 
 [dependencies]
-trailcache-core = { path = "../trailcache-core", version = "0.3.7" }
+trailcache-core = { path = "../trailcache-core", version = "0.3.8" }
 
 # TUI
 ratatui = "0.29"
