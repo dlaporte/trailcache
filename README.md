@@ -99,6 +99,12 @@ cargo install trailcache-tui
 
 ---
 
+## API Specification
+
+Trailcache is built on the BSA Scoutbook/Scouting.org REST API. The complete OpenAPI 3.0 specification is maintained separately: **[scoutbook-api](https://github.com/dlaporte/scoutbook-api)** — documents 90+ endpoints covering authentication, advancement, rosters, training, events, activities, and reference data.
+
+---
+
 ## Technical Details
 
 Built with Rust for maximum performance and safety. Three crates, one codebase:
