@@ -51,6 +51,7 @@ pub fn render(frame: &mut Frame, app: &mut App) {
         ])
         .split(frame.area());
 
+    app.layout_areas.title_bar = chunks[0];
     app.layout_areas.tabs_bar = chunks[1];
 
     render_title_bar(frame, app, chunks[0]);

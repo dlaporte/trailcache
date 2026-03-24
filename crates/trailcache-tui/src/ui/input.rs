@@ -1079,6 +1079,16 @@ fn clicked_table_row(click_row: u16, panel_area: Rect, table_state: &TableState)
 
 /// Handle left click events
 async fn handle_left_click(app: &mut App, col: u16, row: u16) -> Result<bool> {
+    // Check if click is on "[?] Help" in the title bar (right-aligned)
+    if click_in_area(col, row, app.layout_areas.title_bar) {
+        let help_text_len = 8u16; // "[?] Help"
+        let help_start = app.layout_areas.title_bar.right().saturating_sub(help_text_len + 2);
+        if col >= help_start {
+            app.state = AppState::ShowingHelp;
+            return Ok(false);
+        }
+    }
+
     // Check if click is in detail tabs area (right side of tabs bar)
     if app.layout_areas.detail_tabs_area.width > 0
         && click_in_area(col, row, app.layout_areas.detail_tabs_area)

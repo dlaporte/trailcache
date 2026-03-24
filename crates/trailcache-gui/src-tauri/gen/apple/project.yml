@@ -1,6 +1,6 @@
 name: trailcache-gui
 options:
-  bundleIdPrefix: org.trailcache.app
+  bundleIdPrefix: org.davidlaporte.trailcache
   deploymentTarget:
     iOS: 14.0
 fileGroups: [../../src]
@@ -11,7 +11,9 @@ settingGroups:
   app:
     base:
       PRODUCT_NAME: Trailcache
-      PRODUCT_BUNDLE_IDENTIFIER: org.trailcache.app
+      PRODUCT_BUNDLE_IDENTIFIER: org.davidlaporte.trailcache
+      DEVELOPMENT_TEAM: 6JDN2ASZ4F
+      CODE_SIGN_STYLE: Automatic
 targetTemplates:
   app:
     type: application
@@ -31,6 +33,8 @@ targets:
       - path: Sources
       - path: Assets.xcassets
       - path: Externals
+        excludes:
+          - "*/debug/*"
       - path: trailcache-gui_iOS
       - path: assets
         buildPhase: resources
@@ -51,8 +55,8 @@ targets:
           - UIInterfaceOrientationPortraitUpsideDown
           - UIInterfaceOrientationLandscapeLeft
           - UIInterfaceOrientationLandscapeRight
-        CFBundleShortVersionString: 0.2.12
-        CFBundleVersion: "0.2.12"
+        CFBundleShortVersionString: 0.3.9
+        CFBundleVersion: "0.3.9"
     entitlements:
       path: trailcache-gui_iOS/trailcache-gui_iOS.entitlements
     scheme:

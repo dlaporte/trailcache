@@ -244,6 +244,7 @@ enum RefreshResult {
 
 #[derive(Default)]
 pub struct LayoutAreas {
+    pub title_bar: Rect,
     pub tabs_bar: Rect,
     pub left_panel: Rect,
     pub right_panel: Rect,

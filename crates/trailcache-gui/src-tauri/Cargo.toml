@@ -1,6 +1,6 @@
 [package]
 name = "trailcache-gui"
-version = "0.3.8"
+version = "0.3.9"
 description = "Trailcache GUI - cross-platform Scout troop management"
 authors = ["David LaPorte"]
 license = "MIT"
@@ -20,7 +20,7 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 tauri-build = { version = "2.5.4", features = [] }
 
 [dependencies]
-trailcache-core = { path = "../../trailcache-core", version = "0.3.8", features = ["ts"] }
+trailcache-core = { path = "../../trailcache-core", version = "0.3.9", features = ["ts"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 log = "0.4"

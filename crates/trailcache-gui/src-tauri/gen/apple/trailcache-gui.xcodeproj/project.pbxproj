@@ -17,6 +17,7 @@
 		7E759A0F04D9B1B5127913D6 /* QuartzCore.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = F0F024888593AD70C6814094 /* QuartzCore.framework */; };
 		C9FC77B6DB5A4E80455C437C /* libapp.a in Frameworks */ = {isa = PBXBuildFile; fileRef = 3D037705C279F85BA46C5016 /* libapp.a */; };
 		D5D3E805789E16B231ADBF7C /* CoreGraphics.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 8D9CECE05759C320408ACF2B /* CoreGraphics.framework */; };
+		DF3CED4BB50CC1E5623C3486 /* libapp.a in Resources */ = {isa = PBXBuildFile; fileRef = 418CE2BDD51C6CE77EBACF49 /* libapp.a */; };
 		E213AA2DCD96EB9A082E385E /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 467D1C1C96FF07CD0B78268A /* Assets.xcassets */; };
 		F0B74257B2FBD9C407B5E5E4 /* WebKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 122B3F3937D0A731AFAC5921 /* WebKit.framework */; };
 /* End PBXBuildFile section */
@@ -24,10 +25,12 @@
 /* Begin PBXFileReference section */
 		064B47BC6AEC1225593D0D36 /* UIKit.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = UIKit.framework; path = System/Library/Frameworks/UIKit.framework; sourceTree = SDKROOT; };
 		122B3F3937D0A731AFAC5921 /* WebKit.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = WebKit.framework; path = System/Library/Frameworks/WebKit.framework; sourceTree = SDKROOT; };
+		1396390B94F3415623901182 /* dto.rs */ = {isa = PBXFileReference; path = dto.rs; sourceTree = "<group>"; };
 		27E083658E9C59FC368B0F79 /* trailcache-gui_iOS.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = "trailcache-gui_iOS.app"; sourceTree = BUILT_PRODUCTS_DIR; };
 		381BEC83BE8B720ED5705726 /* Security.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = Security.framework; path = System/Library/Frameworks/Security.framework; sourceTree = SDKROOT; };
 		3BAC885D06BF8DA6AA5C0C0C /* state.rs */ = {isa = PBXFileReference; path = state.rs; sourceTree = "<group>"; };
 		3D037705C279F85BA46C5016 /* libapp.a */ = {isa = PBXFileReference; lastKnownFileType = archive.ar; path = libapp.a; sourceTree = "<group>"; };
+		418CE2BDD51C6CE77EBACF49 /* libapp.a */ = {isa = PBXFileReference; lastKnownFileType = archive.ar; path = libapp.a; sourceTree = "<group>"; };
 		467D1C1C96FF07CD0B78268A /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		4E036E208A23E3BC99934E67 /* assets */ = {isa = PBXFileReference; lastKnownFileType = folder; path = assets; sourceTree = SOURCE_ROOT; };
 		8D9CECE05759C320408ACF2B /* CoreGraphics.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = CoreGraphics.framework; path = System/Library/Frameworks/CoreGraphics.framework; sourceTree = SDKROOT; };
@@ -72,6 +75,14 @@
 			path = "trailcache-gui";
 			sourceTree = "<group>";
 		};
+		29E4A6D7C1E98562F8CC21C5 /* release */ = {
+			isa = PBXGroup;
+			children = (
+				418CE2BDD51C6CE77EBACF49 /* libapp.a */,
+			);
+			path = release;
+			sourceTree = "<group>";
+		};
 		2E8F2B5AC5D7D7CC26723921 /* Frameworks */ = {
 			isa = PBXGroup;
 			children = (
@@ -113,8 +124,17 @@
 		904093A8AE5C82A9997C5BD2 /* Externals */ = {
 			isa = PBXGroup;
 			children = (
+				9B41AD39474CDAF97B350897 /* arm64 */,
 			);
 			path = Externals;
+			sourceTree = "<group>";
+		};
+		9B41AD39474CDAF97B350897 /* arm64 */ = {
+			isa = PBXGroup;
+			children = (
+				29E4A6D7C1E98562F8CC21C5 /* release */,
+			);
+			path = arm64;
 			sourceTree = "<group>";
 		};
 		9B68E1C9562C20B70A57F5D1 /* trailcache-gui_iOS */ = {
@@ -146,12 +166,20 @@
 			isa = PBXGroup;
 			children = (
 				8F767A0A6860F46BC949D8E0 /* commands.rs */,
+				1396390B94F3415623901182 /* dto.rs */,
 				98B36DE6E332873807BDC287 /* lib.rs */,
 				F280DA8FA817712EC1821011 /* main.rs */,
 				3BAC885D06BF8DA6AA5C0C0C /* state.rs */,
 			);
 			name = src;
 			path = ../../src;
+			sourceTree = "<group>";
+		};
+		"TEMP_0CB92659-E739-41A2-A84F-6ECC16F89B78" /* x86_64 */ = {
+			isa = PBXGroup;
+			children = (
+			);
+			path = x86_64;
 			sourceTree = "<group>";
 		};
 /* End PBXGroup section */
@@ -185,9 +213,14 @@
 			attributes = {
 				BuildIndependentTargetsInParallel = YES;
 				LastUpgradeCheck = 1430;
+				TargetAttributes = {
+					B090EA7C6A7495AFDCF3559F = {
+						DevelopmentTeam = 6JDN2ASZ4F;
+						ProvisioningStyle = Automatic;
+					};
+				};
 			};
 			buildConfigurationList = CAC389721C9BE2381AA8ECE9 /* Build configuration list for PBXProject "trailcache-gui" */;
-			compatibilityVersion = "Xcode 14.0";
 			developmentRegion = en;
 			hasScannedForEncodings = 0;
 			knownRegions = (
@@ -197,6 +230,7 @@
 			mainGroup = 5D22A2E4A9BF5EF3CF3C835A;
 			minimizedProjectReferenceProxies = 1;
 			preferredProjectObjectVersion = 77;
+			productRefGroup = AA7A53B099C4B8191768F6C7 /* Products */;
 			projectDirPath = "";
 			projectRoot = "";
 			targets = (
@@ -213,6 +247,7 @@
 				E213AA2DCD96EB9A082E385E /* Assets.xcassets in Resources */,
 				6BE9FD85C2A5D8420F0B4B7F /* LaunchScreen.storyboard in Resources */,
 				7142D6F83F2FFB00B70B760B /* assets in Resources */,
+				DF3CED4BB50CC1E5623C3486 /* libapp.a in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -327,6 +362,8 @@
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_ENTITLEMENTS = "trailcache-gui_iOS/trailcache-gui_iOS.entitlements";
 				CODE_SIGN_IDENTITY = "iPhone Developer";
+				CODE_SIGN_STYLE = Automatic;
+				DEVELOPMENT_TEAM = 6JDN2ASZ4F;
 				ENABLE_BITCODE = NO;
 				"EXCLUDED_ARCHS[sdk=iphoneos*]" = x86_64;
 				FRAMEWORK_SEARCH_PATHS = (
@@ -340,7 +377,7 @@
 				);
 				"LIBRARY_SEARCH_PATHS[arch=arm64]" = "$(inherited) $(PROJECT_DIR)/Externals/arm64/$(CONFIGURATION) $(SDKROOT)/usr/lib/swift $(TOOLCHAIN_DIR)/usr/lib/swift/$(PLATFORM_NAME) $(TOOLCHAIN_DIR)/usr/lib/swift-5.0/$(PLATFORM_NAME)";
 				"LIBRARY_SEARCH_PATHS[arch=x86_64]" = "$(inherited) $(PROJECT_DIR)/Externals/x86_64/$(CONFIGURATION) $(SDKROOT)/usr/lib/swift $(TOOLCHAIN_DIR)/usr/lib/swift/$(PLATFORM_NAME) $(TOOLCHAIN_DIR)/usr/lib/swift-5.0/$(PLATFORM_NAME)";
-				PRODUCT_BUNDLE_IDENTIFIER = org.trailcache.app;
+				PRODUCT_BUNDLE_IDENTIFIER = org.davidlaporte.trailcache;
 				PRODUCT_NAME = "Trailcache";
 				SDKROOT = iphoneos;
 				TARGETED_DEVICE_FAMILY = "1,2";
@@ -414,6 +451,8 @@
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_ENTITLEMENTS = "trailcache-gui_iOS/trailcache-gui_iOS.entitlements";
 				CODE_SIGN_IDENTITY = "iPhone Developer";
+				CODE_SIGN_STYLE = Automatic;
+				DEVELOPMENT_TEAM = 6JDN2ASZ4F;
 				ENABLE_BITCODE = NO;
 				"EXCLUDED_ARCHS[sdk=iphoneos*]" = x86_64;
 				FRAMEWORK_SEARCH_PATHS = (
@@ -427,7 +466,7 @@
 				);
 				"LIBRARY_SEARCH_PATHS[arch=arm64]" = "$(inherited) $(PROJECT_DIR)/Externals/arm64/$(CONFIGURATION) $(SDKROOT)/usr/lib/swift $(TOOLCHAIN_DIR)/usr/lib/swift/$(PLATFORM_NAME) $(TOOLCHAIN_DIR)/usr/lib/swift-5.0/$(PLATFORM_NAME)";
 				"LIBRARY_SEARCH_PATHS[arch=x86_64]" = "$(inherited) $(PROJECT_DIR)/Externals/x86_64/$(CONFIGURATION) $(SDKROOT)/usr/lib/swift $(TOOLCHAIN_DIR)/usr/lib/swift/$(PLATFORM_NAME) $(TOOLCHAIN_DIR)/usr/lib/swift-5.0/$(PLATFORM_NAME)";
-				PRODUCT_BUNDLE_IDENTIFIER = org.trailcache.app;
+				PRODUCT_BUNDLE_IDENTIFIER = org.davidlaporte.trailcache;
 				PRODUCT_NAME = "Trailcache";
 				SDKROOT = iphoneos;
 				TARGETED_DEVICE_FAMILY = "1,2";
